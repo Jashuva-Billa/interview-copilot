@@ -1,0 +1,11 @@
+Paste your resume here (plain text) so answers match your background.
+
+Example sections:
+- Name, contact
+- Summary
+- Skills
+- Experience (company, role, dates, bullets)
+- Education
+- Projects
+
+The AI uses this to tailor STAR stories and technical examples to your real experience.
