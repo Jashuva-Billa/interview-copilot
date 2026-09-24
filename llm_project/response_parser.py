@@ -25,10 +25,22 @@ _SECTION_RE = re.compile(
 
 def _strip_code_fences(text: str) -> str:
     text = text.strip()
-    m = re.match(r"^```[\w]*\n?(.*?)```\s*$", text, re.DOTALL | re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-    return text.replace("```", "").strip()
+    # Find all code blocks inside the text
+    blocks = re.findall(r"```[\w]*\n?(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    if blocks:
+        clean_blocks = [b.strip() for b in blocks if b.strip()]
+        return "\n\n".join(clean_blocks)
+    
+    # Handle partial fences during live streaming
+    if text.startswith("```"):
+        first_line_end = text.find("\n")
+        if first_line_end != -1:
+            text = text[first_line_end + 1:]
+        else:
+            text = ""
+    if text.endswith("```"):
+        text = text[:-3]
+    return text.strip()
 
 
 def parse_structured_response(raw: str, is_coding: bool) -> ParsedResponse:

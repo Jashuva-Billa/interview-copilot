@@ -29,9 +29,7 @@ def ensure_project_root() -> None:
 def expected_python() -> Path:
     if FROZEN:
         return Path(sys.executable)
-    if sys.platform == "win32":
-        return VENV_DIR / "Scripts" / "python.exe"
-    return VENV_DIR / "bin" / "python"
+    return VENV_DIR / "Scripts" / "python.exe"
 
 
 def assert_local_venv() -> None:
@@ -56,16 +54,16 @@ def assert_local_venv() -> None:
         "\n[WboxAI] Wrong Python environment.\n"
         f"  Expected: {expected}\n"
         f"  Got:      {actual}\n\n"
-        "This project is isolated from Outreach and other folders.\n"
+        "This project is isolated to its local Windows virtual environment.\n"
         "Start it with:\n"
-        "  Windows:  .\\scripts\\run.ps1\n"
-        "  macOS:    ./scripts/run.sh\n"
+        "  run.bat\n"
+        "  or: .\\venv\\Scripts\\python.exe run_app.py\n"
     )
     raise SystemExit(msg)
 
 
 def assert_env_file() -> None:
-    if not ENV_FILE.is_file():
+    if not ENV_FILE.is_file() and not (ROOT.parent / ".env").is_file():
         example = ROOT / ".env.example"
         hint = f"Copy {example.name} to .env" if example.exists() else "Create .env"
         raise FileNotFoundError(

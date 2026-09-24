@@ -1,4 +1,4 @@
-"""Capture screen for CoderPad / HackerRank (Windows + macOS)."""
+"""Capture screen for CoderPad / HackerRank (Windows 10/11)."""
 
 from __future__ import annotations
 
@@ -33,25 +33,37 @@ def capture_screen_jpeg(
     max_width: int | None = None,
     quality: int | None = None,
     screen_info: dict | None = None,
+    crop: bool = True,
 ) -> bytes:
-    """Capture desktop JPEG — call from background thread only (no Qt)."""
+    """Capture desktop JPEG — call from background thread only (no Qt).
+    
+    When crop=False (e.g. for coding mode / multi-file assessments), full workspace
+    is captured to preserve IDE file explorers, tab bars, and split editor windows.
+    """
     max_width = max_width or config.SCREEN_CAPTURE_MAX_WIDTH
     quality = quality or config.SCREEN_CAPTURE_QUALITY
 
     img = _grab_desktop(screen_info)
     
-    # Crop the image:
-    # - Exclude Chrome tabs/address bar (top 14%)
-    # - Exclude Windows taskbar (bottom 7%)
-    # - Exclude right 20% of screen width (where webcams or chat lists typically float)
-    w, h = img.size
-    top = int(h * 0.14)
-    bottom = int(h * 0.93)
-    right = int(w * 0.80)
-    if bottom > top and right > 0:
-        img = img.crop((0, top, right, bottom))
+    if crop:
+        # Crop the image for standard browser / single window assessments:
+        # - Exclude Chrome tabs/address bar (top 14%)
+        # - Exclude Windows taskbar (bottom 7%)
+        # - Exclude right 20% of screen width (where webcams or chat lists typically float)
+        w, h = img.size
+        top = int(h * 0.14)
+        bottom = int(h * 0.93)
+        right = int(w * 0.80)
+        if bottom > top and right > 0:
+            img = img.crop((0, top, right, bottom))
+    else:
+        # Light bottom crop only (exclude taskbar, preserve full top/left/right IDE workspace)
+        w, h = img.size
+        bottom = int(h * 0.96)
+        if bottom > 0:
+            img = img.crop((0, 0, w, bottom))
 
-    if img.width > max_width:
+    if max_width and img.width > max_width:
         h = max(1, int(img.height * max_width / img.width))
         resample = (
             Image.Resampling.BILINEAR

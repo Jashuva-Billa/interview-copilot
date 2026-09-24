@@ -1,5 +1,5 @@
 """
-WboxAI — Windows + macOS.
+WboxAI — Windows 10/11.
 Isolated project: uses only interview-copilot/.env and interview-copilot/venv.
 """
 
@@ -25,18 +25,6 @@ for _p in (_ROOT, _ROOT / "wboxai_app", _ROOT / "audio_processing", _ROOT / "llm
     if _p_str not in sys.path:
         sys.path.insert(0, _p_str)
 
-# Check command line arguments for configuration request
-if "--config" in sys.argv or "-c" in sys.argv:
-    try:
-        from PyQt6.QtWidgets import QApplication
-        from installer import SetupWizard
-        app = QApplication.instance() or QApplication(sys.argv)
-        wizard = SetupWizard(config_only=True)
-        wizard.show()
-        sys.exit(app.exec())
-    except Exception as e:
-        print(f"Error launching configuration editor: {e}", file=sys.stderr)
-        sys.exit(1)
 
 # Bootstrap before config (venv + .env checks)
 try:
@@ -105,7 +93,18 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QApplication
 
 import config
-from audio_processing.audio_stt import AudioEvent, AudioSTTConfig, AudioToTextPipeline, EventKind
+from audio_processing.audio_stt import (
+    AudioEvent,
+    AudioSourceKind,
+    AudioSTTConfig,
+    AudioToTextPipeline,
+    EventKind,
+    InterviewQuestionProcessor,
+    SpeakerRole,
+    TranscriptSegment,
+)
+from audio_processing.audio_stt.diarization import create_diarization_provider
+from audio_processing.audio_stt.sources import source_metadata
 from audio_processing.audio_capture import AudioChunk, SpeechRecorder
 from llm_project.openai_service import (
     close_client,
@@ -145,6 +144,7 @@ class InterviewApp:
         self.recorder: SpeechRecorder | None = None
         self.audio_pipeline: AudioToTextPipeline | None = None
         self.candidate_pipeline: AudioToTextPipeline | None = None
+        self.question_processor = self._create_question_processor()
         self._pipeline_warmup_thread: threading.Thread | None = None
         self._generation_lock = threading.Lock()
         self._generation_request_id = 0
@@ -160,6 +160,7 @@ class InterviewApp:
         self._pending_scan_detail = "high"
         self._watch_capture_pending = False
         self._shutting_down = False
+        self._assessment_screenshots: list[bytes] = []
 
         self._watcher = ScreenWatcher(on_change=lambda _: None)
         self._watch_timer = QTimer()
@@ -181,6 +182,10 @@ class InterviewApp:
         self.window.scan_screen_requested.connect(self._on_scan_screen)
         self.window.watch_screen_toggled.connect(self._on_watch_toggle)
         self.window.refresh_requested.connect(self._on_refresh_requested)
+        self.window.capture_assessment_requested.connect(self._on_capture_assessment_screenshot)
+        self.window.submit_assessment_requested.connect(self._on_submit_assessment)
+        self.window.clear_assessment_requested.connect(self._on_clear_assessment)
+        self.window.logout_requested.connect(self._on_logout)
         self.app.aboutToQuit.connect(self._shutdown)
 
         if config.SCREEN_WATCH_ENABLED:
@@ -190,9 +195,80 @@ class InterviewApp:
         if config.ENTERPRISE_AUDIO:
             self._start_pipeline_warmup()
 
+    def _audio_settings(self) -> AudioSTTConfig:
+        return AudioSTTConfig(
+            stt_provider=config.AUDIO_STT_PROVIDER,
+            stt_model=config.AUDIO_STT_MODEL,
+            language=config.AUDIO_LANGUAGE,
+            vad_model_path=config.AUDIO_VAD_MODEL_PATH,
+            allow_component_fallback=config.AUDIO_ALLOW_FALLBACK,
+            allow_openai_stt=config.AUDIO_ALLOW_OPENAI_STT,
+            speech_to_text_server_url=config.SPEECH_TO_TEXT_SERVER_URL,
+            speech_to_text_provider=config.SPEECH_TO_TEXT_PROVIDER,
+            speech_to_text_openai_key=config.SPEECH_TO_TEXT_OPENAI_KEY or config.OPENAI_API_KEY,
+            speech_to_text_deepgram_key=config.SPEECH_TO_TEXT_DEEPGRAM_KEY,
+            disable_llm_cleaning=config.DISABLE_LLM_CLEANING,
+            question_confidence_threshold=config.QUESTION_CONFIDENCE_THRESHOLD,
+            role_confidence_threshold=config.ROLE_CONFIDENCE_THRESHOLD,
+            question_dedup_threshold=config.QUESTION_DEDUP_THRESHOLD,
+            llm_trigger_confidence_threshold=config.LLM_TRIGGER_CONFIDENCE_THRESHOLD,
+            context_turn_count=config.LLM_CONTEXT_TURN_COUNT,
+            diarization_provider=config.AUDIO_DIARIZATION_PROVIDER,
+            diarization_model=config.AUDIO_DIARIZATION_MODEL,
+            pyannote_auth_token=config.PYANNOTE_AUTH_TOKEN,
+        )
+
+    def _create_question_processor(self) -> InterviewQuestionProcessor:
+        settings = self._audio_settings()
+        diarization = create_diarization_provider(
+            settings.diarization_provider,
+            model=settings.diarization_model,
+            token=settings.pyannote_auth_token,
+            allow_fallback=settings.allow_component_fallback,
+        )
+        processor = InterviewQuestionProcessor(
+            diarization=diarization,
+            question_confidence_threshold=settings.question_confidence_threshold,
+            trigger_confidence_threshold=settings.llm_trigger_confidence_threshold,
+            context_turns=settings.context_turn_count,
+        )
+        processor.roles.role_confidence_threshold = settings.role_confidence_threshold
+        processor.deduper.threshold = settings.question_dedup_threshold
+        return processor
+
     def _on_error(self, msg: str) -> None:
         self._busy = False
         self.window.status_changed.emit(f"Error: {msg}")
+
+    def _on_logout(self) -> None:
+        """Handle logout: clear session, hide overlay, re-show LoginDialog for re-login."""
+        from login_dialog import clear_session, is_logged_in
+        from PyQt6.QtCore import QEventLoop
+        clear_session()
+        self.window.hide()
+
+        from login_dialog import LoginDialog
+        dlg = LoginDialog()
+        loop = QEventLoop()
+        dlg.finished.connect(loop.quit)
+        dlg.show()
+        loop.exec()
+
+        if is_logged_in():
+            # Reload config from .env (keys may have changed)
+            try:
+                import importlib
+                importlib.reload(config)
+            except Exception:
+                pass
+            self.window.show()
+            self.window.move(80, 80)
+            self.window.raise_()
+            self.window.status_changed.emit("Logged in — Ready")
+        else:
+            # Dismissed without completing login — quit
+            self.app.quit()
+
 
     def _on_refresh_requested(self) -> None:
         print("[main] Refresh requested. Aborting active generation...", flush=True)
@@ -271,38 +347,29 @@ class InterviewApp:
         } if geom else None
         
         # Capture screen for processing
-        if sys.platform == "win32":
-            from capture_exclude import apply_to_window
-            self._was_excluded = config.INVISIBLE_IN_SHARE
-            if not self._was_excluded:
-                apply_to_window(self.window)
-            self._scan_step_capture_and_restore(screen_info)
-        else:
-            self.window.hide()
-            QTimer.singleShot(150, lambda: self._scan_step_capture_and_restore(screen_info))
+        from capture_exclude import apply_to_window
+        self._was_excluded = config.INVISIBLE_IN_SHARE
+        if not self._was_excluded:
+            apply_to_window(self.window)
+        self._scan_step_capture_and_restore(screen_info)
 
     def _scan_step_capture_and_restore(self, screen_info: dict | None) -> None:
         try:
             detail = self._pending_scan_detail
             max_w = 1920 if detail == "high" else None
             quality = 88 if detail == "high" else None
-            jpeg = capture_screen_jpeg(max_width=max_w, quality=quality, screen_info=screen_info)
+            is_coding = self.window.btn_coding.isChecked() if hasattr(self, "window") and hasattr(self.window, "btn_coding") else False
+            jpeg = capture_screen_jpeg(max_width=max_w, quality=quality, screen_info=screen_info, crop=not is_coding)
             
-            if sys.platform == "win32":
-                if not getattr(self, "_was_excluded", False):
-                    from capture_exclude import restore_window
-                    restore_window(self.window)
-            else:
-                self.window.show()
+            if not getattr(self, "_was_excluded", False):
+                from capture_exclude import restore_window
+                restore_window(self.window)
             
             self.bridge.jpeg_ready.emit(jpeg, detail)
         except Exception as e:
-            if sys.platform == "win32":
-                if not getattr(self, "_was_excluded", False):
-                    from capture_exclude import restore_window
-                    restore_window(self.window)
-            else:
-                self.window.show()
+            if not getattr(self, "_was_excluded", False):
+                from capture_exclude import restore_window
+                restore_window(self.window)
             self.bridge.jpeg_ready.emit(b"", self._pending_scan_detail)
             self.bridge.error.emit(format_api_error(e))
             traceback.print_exc()
@@ -398,6 +465,123 @@ class InterviewApp:
             with self._generation_lock:
                 if request_id == self._generation_request_id:
                     self._busy = False
+
+    def _on_capture_assessment_screenshot(self) -> None:
+        """Capture desktop workspace uncropped and append to assessment screenshots list."""
+        if self._busy:
+            self.window.status_changed.emit("Busy — please wait...")
+            return
+        self.window.status_changed.emit("Capturing assessment screenshot...")
+
+        screen = self.window.screen()
+        geom = screen.geometry() if screen else None
+        screen_index = -1
+        if screen:
+            try:
+                screen_index = QApplication.screens().index(screen)
+            except Exception:
+                pass
+
+        screen_info = {
+            "index": screen_index,
+            "x": geom.x(),
+            "y": geom.y(),
+            "width": geom.width(),
+            "height": geom.height(),
+        } if geom else None
+
+        def do_capture():
+            try:
+                jpeg = capture_screen_jpeg(max_width=1920, quality=88, screen_info=screen_info, crop=False)
+                if not getattr(self, "_was_excluded", False):
+                    from capture_exclude import restore_window
+                    restore_window(self.window)
+
+                if jpeg:
+                    self._assessment_screenshots.append(jpeg)
+                    count = len(self._assessment_screenshots)
+                    QTimer.singleShot(0, lambda: self.window.update_assessment_count(count))
+            except Exception as e:
+                print(f"[main] Assessment capture error: {e}", flush=True)
+
+        from capture_exclude import apply_to_window
+        self._was_excluded = config.INVISIBLE_IN_SHARE
+        if not self._was_excluded:
+            apply_to_window(self.window)
+        do_capture()
+
+    def _on_clear_assessment(self) -> None:
+        self._assessment_screenshots.clear()
+        self.window.update_assessment_count(0)
+        self.window.status_changed.emit("Assessment screenshots cleared.")
+
+    def _on_submit_assessment(self) -> None:
+        if not self._assessment_screenshots:
+            self.window.status_changed.emit("No assessment screenshots queued! Click '+ Capture Screen' first.")
+            return
+        if self._busy:
+            self.window.status_changed.emit("Busy — please wait...")
+            return
+
+        self._busy = True
+        self._generation_request_id += 1
+        request_id = self._generation_request_id
+        images = list(self._assessment_screenshots)
+
+        self.window.status_changed.emit(f"Analyzing {len(images)} assessment screenshots (AI Vision)...")
+        self.executor.submit(self._worker_solve_assessment, images, request_id)
+
+    def _worker_solve_assessment(self, images: list[bytes], request_id: int) -> None:
+        from llm_project.openai_service import solve_assessment_multi_image
+
+        with self._generation_lock:
+            if request_id < self._generation_request_id:
+                return
+            self._busy = True
+
+        has_started = False
+        def on_chunk(parsed: ParsedResponse) -> None:
+            nonlocal has_started
+            with self._generation_lock:
+                if request_id < self._generation_request_id:
+                    return
+            if not has_started:
+                has_started = True
+                self.bridge.status.emit("Generating Assessment solution (streaming)...")
+            self.bridge.answer.emit({"provider": "openai", "response": parsed})
+
+        def is_cancelled() -> bool:
+            with self._generation_lock:
+                return request_id < self._generation_request_id
+
+        try:
+            problem, response = solve_assessment_multi_image(
+                images,
+                detail="high",
+                on_chunk=on_chunk,
+                is_cancelled=is_cancelled,
+            )
+
+            with self._generation_lock:
+                if request_id < self._generation_request_id:
+                    return
+                self._busy = False
+
+            active_providers = config.get_active_providers()
+            if active_providers:
+                for provider in active_providers:
+                    self.bridge.answer.emit({"provider": provider, "response": response})
+            else:
+                self.bridge.answer.emit({"provider": "openai", "response": response})
+
+            self.bridge.status.emit(f"Assessment completed ({len(images)} screenshots context)")
+        except Exception as e:
+            with self._generation_lock:
+                if request_id < self._generation_request_id:
+                    return
+                self._busy = False
+            self.bridge.error.emit(format_api_error(e))
+            traceback.print_exc()
 
     def _on_watch_toggle(self, enabled: bool) -> None:
         self._watcher.enabled = enabled
@@ -519,19 +703,7 @@ class InterviewApp:
 
     def _warm_up_pipeline(self) -> None:
         try:
-            settings = AudioSTTConfig(
-                stt_provider=config.AUDIO_STT_PROVIDER,
-                stt_model=config.AUDIO_STT_MODEL,
-                language=config.AUDIO_LANGUAGE,
-                vad_model_path=config.AUDIO_VAD_MODEL_PATH,
-                allow_component_fallback=config.AUDIO_ALLOW_FALLBACK,
-                allow_openai_stt=config.AUDIO_ALLOW_OPENAI_STT,
-                speech_to_text_server_url=config.SPEECH_TO_TEXT_SERVER_URL,
-                speech_to_text_provider=config.SPEECH_TO_TEXT_PROVIDER,
-                speech_to_text_openai_key=config.SPEECH_TO_TEXT_OPENAI_KEY or config.OPENAI_API_KEY,
-                speech_to_text_deepgram_key=config.SPEECH_TO_TEXT_DEEPGRAM_KEY,
-                disable_llm_cleaning=config.DISABLE_LLM_CLEANING,
-            )
+            settings = self._audio_settings()
 
             # 1. System/Interviewer pipeline (loopback)
             from audio_capture import _find_loopback_device
@@ -594,19 +766,7 @@ class InterviewApp:
 
     def _init_and_start_pipeline(self) -> None:
         try:
-            settings = AudioSTTConfig(
-                stt_provider=config.AUDIO_STT_PROVIDER,
-                stt_model=config.AUDIO_STT_MODEL,
-                language=config.AUDIO_LANGUAGE,
-                vad_model_path=config.AUDIO_VAD_MODEL_PATH,
-                allow_component_fallback=config.AUDIO_ALLOW_FALLBACK,
-                allow_openai_stt=config.AUDIO_ALLOW_OPENAI_STT,
-                speech_to_text_server_url=config.SPEECH_TO_TEXT_SERVER_URL,
-                speech_to_text_provider=config.SPEECH_TO_TEXT_PROVIDER,
-                speech_to_text_openai_key=config.SPEECH_TO_TEXT_OPENAI_KEY or config.OPENAI_API_KEY,
-                speech_to_text_deepgram_key=config.SPEECH_TO_TEXT_DEEPGRAM_KEY,
-                disable_llm_cleaning=config.DISABLE_LLM_CLEANING,
-            )
+            settings = self._audio_settings()
 
             # 1. System/Interviewer pipeline (loopback)
             from audio_capture import _find_loopback_device
@@ -697,6 +857,31 @@ class InterviewApp:
             return 0.0
         return len(w1.intersection(w2)) / len(w1.union(w2))
 
+    def _structured_transcript(
+        self,
+        text: str,
+        is_final: bool,
+        source: AudioSourceKind,
+        latency_ms: float = 0.0,
+    ) -> TranscriptSegment:
+        now = time.monotonic()
+        words = max(1, len(text.split()))
+        estimated_duration = min(12.0, max(0.35, words * 0.32))
+        start = max(0.0, now - estimated_duration)
+        metadata = source_metadata(source, start, now)
+        confidence = 0.78 if is_final else 0.45
+        if latency_ms > 0:
+            confidence = min(0.90, confidence + 0.04)
+        return TranscriptSegment(
+            text=text,
+            start=start,
+            end=now,
+            is_final=is_final,
+            confidence=confidence,
+            provider=config.AUDIO_STT_PROVIDER,
+            source=metadata,
+        )
+
     def _on_audio_transcript(self, text: str, is_final: bool, latency_ms: float = 0.0) -> None:
         text = text.strip()
         if not text:
@@ -717,32 +902,6 @@ class InterviewApp:
         if is_final:
             from latency_tracker import tracker
             tracker.record_stt(text, is_final, latency_ms)
-            tracker.record_dialogue("Interviewer", text)
-
-        now = time.time()
-        time_since_last = now - self._last_question_time
-
-        is_continuation = False
-        if self._last_final_question:
-            if self._busy:
-                is_continuation = True
-            elif time_since_last < 6.0:
-                is_continuation = True
-            else:
-                last_role = self.conversation[-1]["role"] if self.conversation else None
-                if last_role == "user":
-                    is_continuation = True
-
-        if is_continuation:
-            display_text = f"{self._last_final_question} {text}"
-        else:
-            display_text = text
-
-        if is_final:
-            self._last_final_question = display_text
-            self._last_question_time = now
-
-        self.window.set_question(display_text)
 
         now = time.time()
         is_partial = not is_final
@@ -770,16 +929,45 @@ class InterviewApp:
             self._last_partial_submit_time = 0.0
 
         if is_final:
+            segment = self._structured_transcript(
+                text,
+                True,
+                AudioSourceKind.SYSTEM,
+                latency_ms,
+            )
+            decision = self.question_processor.process_transcript(segment)
+            if decision.turn is not None:
+                role_label = (
+                    "Interviewer"
+                    if decision.turn.role == SpeakerRole.INTERVIEWER
+                    else "Candidate"
+                    if decision.turn.role == SpeakerRole.CANDIDATE
+                    else "Unknown"
+                )
+                from latency_tracker import tracker
+                tracker.record_dialogue(role_label, decision.turn.text)
+                if decision.turn.role == SpeakerRole.INTERVIEWER:
+                    self.window.set_question(decision.turn.text)
+
+            if decision.question is None:
+                self.window.status_changed.emit(f"Listening — {decision.reason}")
+                return
+
+            llm_input = decision.question.to_llm_input()
+            display_text = llm_input["question"]
+            self._last_final_question = display_text
+            self._last_question_time = now
+            self.window.set_question(display_text)
+
             force = self._force_next_coding
             self._force_next_coding = False
-
             self._generation_request_id += 1
             self.executor.submit(
                 self._generate_for_question,
                 display_text,
                 force,
                 self._generation_request_id,
-                is_final,
+                True,
             )
 
     def _on_candidate_transcript(self, text: str, is_final: bool) -> None:
@@ -791,8 +979,12 @@ class InterviewApp:
         if not is_final:
             return
 
+        segment = self._structured_transcript(text, True, AudioSourceKind.MICROPHONE)
+        decision = self.question_processor.process_transcript(segment)
+        final_text = decision.turn.text if decision.turn is not None else text
+
         from latency_tracker import tracker
-        tracker.record_dialogue("Candidate", text)
+        tracker.record_dialogue("Candidate", final_text)
         
         try:
             from token_tracker import tracker_instance
@@ -800,13 +992,13 @@ class InterviewApp:
         except Exception:
             pass
 
-        self._recent_candidate_speech.append(text)
+        self._recent_candidate_speech.append(final_text)
         if len(self._recent_candidate_speech) > 5:
             self._recent_candidate_speech.pop(0)
 
         with self._generation_lock:
-            self.conversation.append({"role": "assistant", "content": text})
-            print(f"[candidate] answer saved to history: '{text}'", flush=True)
+            self.conversation.append({"role": "assistant", "content": final_text})
+            print(f"[candidate] answer saved to history: '{final_text}'", flush=True)
 
     def _stop_listening(self) -> None:
         if self.audio_pipeline is not None:
@@ -973,8 +1165,39 @@ class InterviewApp:
 
     def run(self) -> int:
         self.app.setQuitOnLastWindowClosed(False)
+
+        # ---- Login gate: show LoginDialog if no valid session ----
+        from login_dialog import is_logged_in, get_candidate_mode
+        if not is_logged_in():
+            from login_dialog import LoginDialog
+            from PyQt6.QtCore import QEventLoop
+            dlg = LoginDialog()
+            loop = QEventLoop()
+            dlg.finished.connect(loop.quit)
+            dlg.show()
+            loop.exec()
+
+            if not is_logged_in():
+                # User closed the dialog without completing login
+                return 0
+
+            # Reload config so freshly-written .env keys are active
+            try:
+                import importlib
+                importlib.reload(config)
+            except Exception:
+                pass
+
+        # ---- Candidate picker — mode-aware ----
         from overlay import show_resume_dialog
-        show_resume_dialog()
+        candidate_mode = get_candidate_mode()
+        if candidate_mode == "WHITEBOX":
+            show_resume_dialog(whitebox_mode=True)
+        elif candidate_mode == "MANUAL":
+            show_resume_dialog(whitebox_mode=False)
+        else:
+            # Legacy session without mode — use generic picker
+            show_resume_dialog()
         self.app.setQuitOnLastWindowClosed(True)
 
         # Update dynamic filepaths for latency tracker using chosen candidate
@@ -983,7 +1206,7 @@ class InterviewApp:
         from latency_tracker import tracker
         tracker.set_dynamic_filepaths(candidate_name, timestamp)
 
-        plat = "macOS" if config.IS_MAC else "Windows"
+        plat = "Windows"
         self.window.show()
         self.window.move(80, 80)
         self.window.raise_()
@@ -1015,6 +1238,18 @@ class InterviewApp:
 
 
 def main() -> None:
+    if "--config" in sys.argv or "--setup" in sys.argv:
+        try:
+            from PyQt6.QtWidgets import QApplication
+            from installer import SetupWizard
+            app = QApplication.instance() or QApplication(sys.argv)
+            wizard = SetupWizard(config_only=True)
+            wizard.show()
+            sys.exit(app.exec())
+        except Exception as e:
+            print(f"Error launching configuration editor: {e}", file=sys.stderr)
+            sys.exit(1)
+
     app = InterviewApp()
     sys.exit(app.run())
 

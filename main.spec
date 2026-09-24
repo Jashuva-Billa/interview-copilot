@@ -48,14 +48,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='wboxai_app/logo.ico' if __import__('sys').platform == 'win32' else None,
+    icon='wboxai_app/logo.ico',
 )
-
-if __import__('sys').platform == 'darwin' and 'BUNDLE' in globals():
-    app = BUNDLE(
-        exe,
-        name='wboxai.app',
-        icon=None,
-        bundle_identifier='com.wboxai.app',
-    )
 

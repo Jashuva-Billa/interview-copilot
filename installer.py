@@ -296,6 +296,9 @@ class SetupWizard(QMainWindow):
         self.first_time_setup = first_time_setup
         self.setup_successful = False
         self.config_data = {}
+        # Tracks which mode the user chose on the Selection page (page 6).
+        # Set immediately when the user clicks Next on that page.
+        self._chosen_auth_mode = "MANUAL"  # default; overridden by selection page
         
         self.setWindowTitle("WboxAI Setup")
         self.setFixedSize(620, 520)
@@ -776,9 +779,9 @@ class SetupWizard(QMainWindow):
                 <body>
                     <div class="container">
                         <div class="success-icon">&#10004;</div>
-                        <h1>Login Success!</h1>
-                        <p>Your authentication token was successfully transferred to the WboxAI Setup Wizard.</p>
-                        <p>You may now safely close this browser tab and return to the Setup Wizard.</p>
+                        <h1>Thank You!</h1>
+                        <p>Your authentication was successful.</p>
+                        <p>You are good to close this browser tab and go back to WboxAI.</p>
                     </div>
                 </body>
                 </html>
@@ -907,6 +910,22 @@ class SetupWizard(QMainWindow):
             f"{base_url_stripped}/api/candidate/llm-keys",
             f"{base_url_stripped}/api/candidate/llm",
             f"{base_url_stripped}/api/candidate/keys",
+            f"{base_url_stripped}/api/user/resume",
+            f"{base_url_stripped}/api/user/profile",
+            f"{base_url_stripped}/api/user/llm-keys",
+            f"{base_url_stripped}/api/user/keys",
+            f"{base_url_stripped}/api/user_dashboard/my-resume",
+            f"{base_url_stripped}/api/user_dashboard/resume",
+            f"{base_url_stripped}/api/user_dashboard/my-llm-setup",
+            f"{base_url_stripped}/api/user_dashboard/llm",
+            f"{base_url_stripped}/api/resume",
+            f"{base_url_stripped}/api/llm",
+            f"{base_url_stripped}/api/llm-keys",
+            f"{base_url_stripped}/api/keys",
+            f"{base_url_stripped}/api/profile",
+            f"{base_url_stripped}/api/me",
+            f"{base_url_stripped}/api/auth/me",
+            f"{base_url_stripped}/api/user",
         ]
         
         ctx = ssl.create_default_context()
@@ -977,13 +996,17 @@ class SetupWizard(QMainWindow):
         backend_data = None
         
         if token:
+            print(f"\n[WBL Sync] Token received (first 20 chars): {token[:20]}...", flush=True)
+            print(f"[WBL Sync] Base URL: {base_url}", flush=True)
             self.web_status_label.setText(f"Token acquired! Syncing from WBL backend server ({base_url})...")
             backend_data = self.fetch_data_from_wbl_backend(token, base_url)
+            print(f"[WBL Sync] Backend data keys: {list(backend_data.keys()) if isinstance(backend_data, dict) else backend_data}", flush=True)
             
         # Parse combined data (backend + fallback local storage)
         combined = {}
         if isinstance(backend_data, dict):
             combined.update(backend_data)
+
             
         import json
         for k, v in result.items():
@@ -1103,6 +1126,14 @@ class SetupWizard(QMainWindow):
         sk_match = re.search(r"sk-[a-zA-Z0-9_-]{30,}", raw_str)
         if sk_match and not openai_key:
             openai_key = sk_match.group(0)
+
+        # ---- Debug: log what we extracted ----
+        print(f"\n[WBL Sync] Extraction results:", flush=True)
+        print(f"  OpenAI key: {'found (' + openai_key[:12] + '...)' if openai_key else 'NOT FOUND'}", flush=True)
+        print(f"  Gemini key: {'found' if gemini_key else 'NOT FOUND'}", flush=True)
+        print(f"  Claude key: {'found' if claude_key else 'NOT FOUND'}", flush=True)
+        print(f"  Resume:     {'found (' + str(len(resume)) + ' chars)' if resume else 'NOT FOUND'}", flush=True)
+        print(f"  Job role:   {job_role or 'NOT FOUND'}", flush=True)
             
         if openai_key:
             self.edit_openai.setText(openai_key)
@@ -1128,6 +1159,18 @@ class SetupWizard(QMainWindow):
                 f"Claude Key: {'Configured' if claude_key else 'Not Found'}\n"
                 f"Resume: {'Synced' if resume else 'Not Found'}"
             )
+            # Mark session as logged in via WBL OAuth
+            try:
+                from login_dialog import save_session
+                _mode = getattr(self, "_chosen_auth_mode", "WHITEBOX")
+                save_session({
+                    "logged_in": True,
+                    "method": "whitebox_learning",
+                    "auth_mode": _mode,
+                    "candidate_mode": _mode,
+                })
+            except Exception:
+                pass
             self.pages.setCurrentIndex(3) # Move to settings verification page
             self.update_navigation()
         else:
@@ -1137,6 +1180,18 @@ class SetupWizard(QMainWindow):
                 "Logged in, but could not automatically retrieve API keys or resume text from your profile.\n"
                 "Please configure settings manually on the next page."
             )
+            # Still mark as logged in (OAuth succeeded even if API sync failed)
+            try:
+                from login_dialog import save_session
+                _mode = getattr(self, "_chosen_auth_mode", "WHITEBOX")
+                save_session({
+                    "logged_in": True,
+                    "method": "whitebox_learning",
+                    "auth_mode": _mode,
+                    "candidate_mode": _mode,
+                })
+            except Exception:
+                pass
             self.pages.setCurrentIndex(2) # Go to manual AI Config page
             self.update_navigation()
 
@@ -1282,9 +1337,11 @@ class SetupWizard(QMainWindow):
 
         if idx == 6: # Selection Page
             if self.btn_wbox_setup.isChecked():
+                self._chosen_auth_mode = "WHITEBOX"
                 self.load_web_login()
                 self.pages.setCurrentIndex(7) # Go to Web Login page
             else:
+                self._chosen_auth_mode = "MANUAL"
                 self.pages.setCurrentIndex(2) # Go to Manual AI Config page
             self.update_navigation()
             return
@@ -1423,13 +1480,30 @@ class SetupWizard(QMainWindow):
             if wboxai_app_dir.is_dir():
                 (wboxai_app_dir / ".env").write_text("\n".join(env_lines), encoding="utf-8")
                 
-            # (Intro text writing to file removed)
+            if self.config_data.get("resume_text"):
+                (exe_dir / "resume_context.txt").write_text(self.config_data["resume_text"], encoding="utf-8")
                 
             self.fin_desc.setText(
                 "Configuration settings saved successfully!\n\n"
                 "You can now launch the WboxAI application."
             )
             self.chk_launch.setText("Launch WboxAI now")
+            # Mark session as logged in (manual setup complete)
+            try:
+                from login_dialog import save_session, load_session
+                _mode = getattr(self, "_chosen_auth_mode", "MANUAL")
+                # Merge: preserve any auth/candidate_mode already written by LoginDialog
+                existing = load_session()
+                existing.update({
+                    "logged_in": True,
+                    "method": "manual" if _mode == "MANUAL" else "whitebox_learning",
+                    "auth_mode": existing.get("auth_mode") or _mode,
+                    "candidate_mode": existing.get("candidate_mode") or _mode,
+                })
+                save_session(existing)
+            except Exception:
+                pass
+            self.setup_successful = True
             self.pages.setCurrentIndex(5)
         except Exception as e:
             QMessageBox.critical(self, "Save Failed", f"Could not write configuration settings:\n{e}")
@@ -1486,8 +1560,25 @@ class SetupWizard(QMainWindow):
             if wboxai_app_dir.is_dir():
                 (wboxai_app_dir / ".env").write_text("\n".join(env_lines), encoding="utf-8")
 
-            # Removed generation of context text files per user request.
+            if self.config_data.get("resume_text"):
+                (exe_dir / "resume_context.txt").write_text(self.config_data["resume_text"], encoding="utf-8")
             
+            # Mark session as logged in (manual setup complete)
+            try:
+                from login_dialog import save_session, load_session
+                _mode = getattr(self, "_chosen_auth_mode", "MANUAL")
+                # Merge: preserve any auth/candidate_mode already written by LoginDialog
+                existing = load_session()
+                existing.update({
+                    "logged_in": True,
+                    "method": "manual" if _mode == "MANUAL" else "whitebox_learning",
+                    "auth_mode": existing.get("auth_mode") or _mode,
+                    "candidate_mode": existing.get("candidate_mode") or _mode,
+                })
+                save_session(existing)
+            except Exception:
+                pass
+            self.setup_successful = True
             # Create shortcuts if Windows
             if sys.platform == "win32":
                 self.create_windows_shortcuts(Path(sys.executable).resolve())

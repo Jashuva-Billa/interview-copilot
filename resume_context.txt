@@ -1,0 +1,44 @@
+{
+  "basics": {
+    "name": "Sonali Ojha",
+    "label": "AI/ML Engineer",
+    "email": "sonali.ojha.social@gmail.com",
+    "phone": "+1 (408) 766-9128",
+    "location": {
+      "city": "Danville",
+      "region": "CA"
+    },
+    "profiles": [
+      {
+        "network": "LinkedIn",
+        "url": "https://www.linkedin.com/in/sonali-ojha-mishra"
+      }
+    ]
+  },
+  "work": [
+    {
+      "company": "Gainwell Technologies",
+      "position": "AI/ML Engineer",
+      "location": "Irving, TX",
+      "startDate": "July 2023",
+      "endDate": "Present",
+      "website": "",
+      "highlights": [
+        "Designed and implemented an enterprise-scale Retrieval-Augmented Generation (RAG) system for healthcare compliance monitoring, integrating regulatory documents, historical patterns, and real-time policy updates.",
+        "Developed document ingestion workflows with Docling to process PDFs and policy documents into structured text and embeddings for downstream GenAI pipelines.",
+        "Built RAG Graph pipelines using Neo4j to model entity relationships and support graph-based retrieval for improved contextual reasoning.",
+        "Integrated vector search frameworks for semantic similarity matching, enabling precise retrieval from large-scale document embeddings.",
+        "Implemented multi-agent orchestration using LangGraph, defining specialized agents for retrieval, evaluation, and workflow automation with standardized task routing.",
+        "Applied Model Context Protocol (MCP) to enable structured, context-aware communication between distributed agents across the orchestration pipeline.",
+        "Established evaluation workflows for multi-agent collaboration, combining LLM-as-a-judge assessments, BERT-based scoring, and a feedback loop with human-in-the-loop validation to continuously refine outputs.",
+        "Leveraged LangSmith for detailed tracing, monitoring, and observability of agent workflows, ensuring transparency and fine-grained error analysis.",
+        "Built observability pipelines to capture structured data logs, metrics, and traces, providing visibility into retrieval accuracy, generation quality, and system health.",
+        "Developed real-time data pipelines with MongoDB for ingestion and storage of communication records, supporting automated scoring and anomaly detection workflows.",
+        "Architected cloud-native infrastructure on AWS EKS, containerizing GenAI microservices with Docker and deploying updates through blue-green deployment strategies.",
+        "Designed AWS Lambda workflows for asynchronous processing, KPI computation, and evaluation triggers across distributed GenAI services.",
+        "Built RESTful APIs with FastAPI for seamless integration between GenAI services and React-based frontend applications.",
+        "Leveraged AWS Bedrock for large language model inference and scalable foundation model deployment in production environments."
+      ]
+    }
+  ]
+}

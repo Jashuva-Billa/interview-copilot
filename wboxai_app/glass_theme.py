@@ -130,6 +130,22 @@ def stylesheet(*, transparent: bool = True) -> str:
         margin: 0px;
     }}
     QPushButton#close:hover, QToolButton#close:hover {{ background-color: {c["hover"]}; color: {TEXT}; }}
+    QPushButton#logout, QToolButton#logout {{
+        background: transparent;
+        color: rgba(248, 113, 113, 200);
+        border: none;
+        height: 30px;
+        width: 30px;
+        border-radius: 15px;
+        font-size: 16px;
+        font-weight: normal;
+        padding: 0;
+        margin: 0px;
+    }}
+    QPushButton#logout:hover, QToolButton#logout:hover {{
+        background-color: rgba(239, 68, 68, 35);
+        color: rgba(252, 165, 165, 240);
+    }}
     QPushButton#refresh, QToolButton#refresh {{
         background-color: rgba(0, 0, 0, 90);
         color: {TEXT};

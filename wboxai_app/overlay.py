@@ -1,4 +1,4 @@
-"""Overlay UI — invisible in screen share (Windows + macOS)."""
+"""Overlay UI — invisible in screen share (Windows 10/11)."""
 
 from __future__ import annotations
 
@@ -230,7 +230,7 @@ class QToggleSwitch(QAbstractButton):
         # Draw text inside track if present
         if self.text():
             p.setPen(text_color)
-            font = QFont("Segoe UI" if config.IS_WINDOWS else ".AppleSystemUIFont", 10)
+            font = QFont("Segoe UI", 10)
             p.setFont(font)
             if self.isChecked():
                 # Thumb is on the right, draw text on the left
@@ -398,7 +398,7 @@ def get_candidate_list() -> list[dict]:
     return mocks
 
 
-def show_resume_dialog(parent=None) -> None:
+def show_resume_dialog(parent=None, whitebox_mode: bool | None = None) -> None:
     from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QMessageBox, QLabel, QComboBox
     from PyQt6.QtCore import Qt
     import json
@@ -449,7 +449,12 @@ def show_resume_dialog(parent=None) -> None:
     btn_layout.addWidget(btn_manual)
     layout.addLayout(btn_layout)
 
-    # Manual edit mode switch
+    # Whitebox mode: disable manual-edit switch (user already chose Whitebox)
+    if whitebox_mode is True:
+        btn_manual.setVisible(False)
+        lbl_select.setText("Select Candidate (Whitebox):")
+
+    # Manual mode start: open directly in editable state
     def switch_to_manual():
         text_preview.setReadOnly(False)
         combo_candidates.setEnabled(False)
@@ -459,7 +464,14 @@ def show_resume_dialog(parent=None) -> None:
 
     btn_manual.clicked.connect(switch_to_manual)
 
-    text_preview.setReadOnly(True) # read-only until manual switch clicked
+    # For MANUAL mode, drop straight into editable state without a prompt
+    if whitebox_mode is False:
+        text_preview.setReadOnly(False)
+        combo_candidates.setEnabled(False)
+        btn_start.setText("Save & Start WboxAI")
+        btn_manual.setVisible(False)
+    else:
+        text_preview.setReadOnly(True)  # read-only until manual switch clicked
 
     def on_start():
         content = text_preview.toPlainText().strip()
@@ -557,6 +569,11 @@ class OverlayWindow(QMainWindow):
     scan_screen_requested = pyqtSignal()
     watch_screen_toggled = pyqtSignal(bool)
     refresh_requested = pyqtSignal()
+    assessment_mode_toggled = pyqtSignal(bool)
+    capture_assessment_requested = pyqtSignal()
+    submit_assessment_requested = pyqtSignal()
+    clear_assessment_requested = pyqtSignal()
+    logout_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -655,6 +672,11 @@ class OverlayWindow(QMainWindow):
         self.btn_coding.toggled.connect(self._on_force_coding_click)
         header.addWidget(self.btn_coding)
 
+        self.btn_assessment = QToggleSwitch(text="Assessments", mini_thumb=True)
+        self.btn_assessment.setChecked(False)
+        self.btn_assessment.toggled.connect(self._on_assessment_toggle)
+        header.addWidget(self.btn_assessment)
+
         self.btn_share_hide = QToggleSwitch(text="Share-Hide")
         self.btn_share_hide.setChecked(config.INVISIBLE_IN_SHARE)
         self.btn_share_hide.toggled.connect(self._on_share_hide_toggle)
@@ -692,6 +714,13 @@ class OverlayWindow(QMainWindow):
         self.btn_refresh.clicked.connect(self._on_refresh_clicked)
         header.addWidget(self.btn_refresh)
 
+        self.btn_logout = QPushButton("⏻")
+        self.btn_logout.setObjectName("logout")
+        self.btn_logout.setFixedSize(30, 30)
+        self.btn_logout.setToolTip("Logout — return to login screen")
+        self.btn_logout.clicked.connect(self._on_logout_clicked)
+        header.addWidget(self.btn_logout)
+
         self.btn_close = QPushButton("✕")
         self.btn_close.setObjectName("close")
         self.btn_close.setFixedSize(30, 30)
@@ -700,6 +729,38 @@ class OverlayWindow(QMainWindow):
         header.addWidget(self.btn_close)
 
         layout.addLayout(header)
+
+        # Assessment sub-bar layout (shown when Assessments toggle is active)
+        self.assessment_bar_widget = QWidget()
+        as_layout = QHBoxLayout(self.assessment_bar_widget)
+        as_layout.setContentsMargins(4, 2, 4, 2)
+        as_layout.setSpacing(8)
+
+        as_label = QLabel("Assessment Context:")
+        as_label.setStyleSheet("font-weight: bold; color: #60A5FA; font-size: 11px;")
+        as_layout.addWidget(as_label)
+
+        self.btn_add_screen = QPushButton("+ Capture Screen")
+        self.btn_add_screen.setObjectName("primary")
+        self.btn_add_screen.setFixedHeight(26)
+        self.btn_add_screen.clicked.connect(self._on_add_assessment_screen)
+        as_layout.addWidget(self.btn_add_screen)
+
+        self.btn_submit_assessment = QPushButton("Submit (0)")
+        self.btn_submit_assessment.setObjectName("primary")
+        self.btn_submit_assessment.setFixedHeight(26)
+        self.btn_submit_assessment.setStyleSheet("background-color: #10B981; color: white; font-weight: bold; padding: 2px 12px;")
+        self.btn_submit_assessment.clicked.connect(self._on_submit_assessment)
+        as_layout.addWidget(self.btn_submit_assessment)
+
+        self.btn_clear_assessment = QPushButton("Clear")
+        self.btn_clear_assessment.setFixedHeight(26)
+        self.btn_clear_assessment.clicked.connect(self._on_clear_assessment)
+        as_layout.addWidget(self.btn_clear_assessment)
+        as_layout.addStretch()
+
+        self.assessment_bar_widget.hide()
+        layout.addWidget(self.assessment_bar_widget)
 
         # Opacity slider: 0 = transparent, 100 = solid panel.
         self.blur_slider = QSlider(Qt.Orientation.Horizontal)
@@ -769,7 +830,7 @@ class OverlayWindow(QMainWindow):
                 code_box = QPlainTextEdit()
                 code_box.setReadOnly(True)
                 self._make_see_through_edit(code_box)
-                mono = QFont("Menlo" if config.IS_MAC else "Consolas", 16)
+                mono = QFont("Consolas", 16)
                 code_box.setFont(mono)
                 code_box.setMaximumHeight(200)
                 code_layout.addWidget(code_box)
@@ -843,7 +904,7 @@ class OverlayWindow(QMainWindow):
             self._apply_panel_shadow(central)
         self.setStyleSheet(glass_stylesheet(transparent=self._transparent))
         self.set_text_color_mode(is_light_bg=False)
-        QApplication.setFont(QFont("Segoe UI" if config.IS_WINDOWS else ".AppleSystemUIFont", 14))
+        QApplication.setFont(QFont("Segoe UI", 14))
 
         QShortcut(QKeySequence("Ctrl+H"), self, self.hide)
         QShortcut(QKeySequence("Ctrl+Shift+H"), self, self._show_and_exclude)
@@ -892,6 +953,7 @@ class OverlayWindow(QMainWindow):
             self.btn_auto_scan,
             self.btn_share_hide,
             self.btn_refresh,
+            self.btn_logout,
             self.btn_listen,
             self.btn_close,
             self.blur_slider,
@@ -1152,6 +1214,18 @@ class OverlayWindow(QMainWindow):
         else:
             self.close()
 
+    def _on_logout_clicked(self) -> None:
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Logout",
+            "Are you sure you want to logout?\n\nYou will need to sign in again to use WboxAI.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.logout_requested.emit()
+
     def _on_configure_clicked(self) -> None:
         from installer import SetupWizard
         
@@ -1217,10 +1291,41 @@ class OverlayWindow(QMainWindow):
         self.schedule_exclude()
 
     def _on_scan_button_clicked(self) -> None:
-        self.scan_screen_requested.emit()
-        self._animate_auto_scan(True)
-        self._auto_hide_timer.start(10000) # Show for 10 seconds
+        if self.btn_assessment.isChecked():
+            self.capture_assessment_requested.emit()
+        else:
+            self.scan_screen_requested.emit()
+            self._animate_auto_scan(True)
+            self._auto_hide_timer.start(10000) # Show for 10 seconds
         self.schedule_exclude()
+
+    def _on_assessment_toggle(self, checked: bool) -> None:
+        if checked:
+            self.btn_coding.setChecked(True)
+            self.assessment_bar_widget.show()
+            self.status_label.setText("Assessment Mode active: Capture screenshots then click Submit.")
+        else:
+            self.assessment_bar_widget.hide()
+            self.status_label.setText("Ready")
+        self.assessment_mode_toggled.emit(checked)
+        self.schedule_exclude()
+
+    def update_assessment_count(self, count: int) -> None:
+        self.btn_submit_assessment.setText(f"Submit ({count})")
+        if count == 0:
+            self.status_label.setText("Assessment Mode: 0 screenshots queued. Click '+ Capture Screen' or 'Scan screen'.")
+        else:
+            self.status_label.setText(f"Assessment Mode: {count} screenshot(s) queued. Click Submit when ready.")
+        self.schedule_exclude()
+
+    def _on_add_assessment_screen(self) -> None:
+        self.capture_assessment_requested.emit()
+
+    def _on_submit_assessment(self) -> None:
+        self.submit_assessment_requested.emit()
+
+    def _on_clear_assessment(self) -> None:
+        self.clear_assessment_requested.emit()
 
     def _on_auto_scan_toggled(self, checked: bool) -> None:
         self.watch_screen_toggled.emit(checked)
@@ -1327,11 +1432,30 @@ class OverlayWindow(QMainWindow):
 
     def _update_all_responses_layout(self) -> None:
         is_coding_active = self.btn_coding.isChecked()
+        is_assessment_active = self.btn_assessment.isChecked()
         has_any_code_layout = False
         
         for provider, col in self.columns.items():
-            if is_coding_active:
+            if is_assessment_active:
                 col["code_section"].show()
+                col["answer_box"].hide()
+                col["header"].setText(f"{provider.capitalize()} Code")
+                
+                response = None
+                if hasattr(self, "_last_responses") and self._last_responses and provider in self._last_responses:
+                    response = self._last_responses[provider].get("response")
+                
+                if response:
+                    code_text = response.code or ""
+                    if not code_text or code_text.strip().upper() == "N/A":
+                        code_text = f"// Generating assessment code solution... Please wait..."
+                    self._set_plain_text_autoscroll(col["code_box"], code_text)
+                else:
+                    self._set_plain_text_autoscroll(col["code_box"], "// Ready for assessment screenshots submission")
+                has_any_code_layout = True
+            elif is_coding_active:
+                col["code_section"].show()
+                col["answer_box"].show()
                 col["header"].setText(f"{provider.capitalize()} (Approach)")
                 
                 response = None
@@ -1350,6 +1474,7 @@ class OverlayWindow(QMainWindow):
                 has_any_code_layout = True
             else:
                 col["code_section"].hide()
+                col["answer_box"].show()
                 col["header"].setText(f"{provider.capitalize()} Answer")
                 
                 response = None
@@ -1601,6 +1726,26 @@ class OverlayWindow(QMainWindow):
                 btn.setStyleSheet(btn_refresh_style)
             elif obj_name == "close":
                 btn.setStyleSheet(btn_close_style)
+            elif obj_name == "logout":
+                # Logout button stays consistently red-tinted regardless of bg mode
+                btn.setStyleSheet("""
+                    QPushButton#logout {
+                        background: transparent;
+                        color: rgba(248, 113, 113, 200);
+                        border: none;
+                        height: 30px;
+                        width: 30px;
+                        border-radius: 15px;
+                        font-size: 16px;
+                        font-weight: normal;
+                        padding: 0;
+                        margin: 0px;
+                    }
+                    QPushButton#logout:hover {
+                        background-color: rgba(239, 68, 68, 35);
+                        color: rgba(252, 165, 165, 240);
+                    }
+                """)
 
         if hasattr(self, "blur_slider"):
             self.blur_slider.setStyleSheet(slider_style)

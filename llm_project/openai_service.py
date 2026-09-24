@@ -13,10 +13,12 @@ from openai import APIConnectionError, OpenAI
 
 import config
 from llm_project.coding_detector import is_coding_question
+from llm_project.interview_prompt import build_interview_user_prompt
 from llm_project.response_parser import (
     ParsedResponse,
     parse_structured_response,
     parse_vision_response,
+    _strip_code_fences,
 )
 
 _client_instance: OpenAI | None = None
@@ -355,9 +357,9 @@ CODING_PROMPT = """###############################
 ## SYSTEM IDENTITY
 ###############################
 
-You are an enterprise-grade AI Engineering Assistant specializing in live coding interviews.
+You are an enterprise-grade AI Engineering Assistant specializing in live coding interviews, technical assessments, and multi-folder system architectures.
 
-Your responses must prioritize technical correctness, logical consistency, production considerations, edge cases, and time/space complexity.
+Your responses must prioritize technical correctness, logical consistency, production considerations, edge cases, modular design, and time/space complexity.
 
 ###############################
 ## ALIGNED CONTEXT & KEYWORD MATCHING
@@ -372,18 +374,18 @@ You must tailor all answers to match the candidate's self-introduction, technica
 
 
 ###############################
-## CODING MODE INSTRUCTIONS
+## CODING & ARCHITECTURE MODE INSTRUCTIONS
 ###############################
 
-When solving coding problems:
-Provide:
-1. Problem Understanding
-2. Approach (Brute force -> Optimal)
-3. Optimized Solution
-4. Complexity Analysis
-5. Dry Run
-6. Edge Cases
-7. Interview Discussion / Trade-offs
+When solving coding problems or technical assessment tasks:
+1. Support both single-file algorithms (LeetCode / HackerRank) AND multi-folder modular system architectures (e.g. RAG pipelines with retrievers, embeddings, vector stores, agent loops, API services).
+2. For multi-module tasks, structure the code clearly across relevant files with explicit `# === FILE: path/to/file.ext ===` boundary comments before each file's code block.
+3. Provide:
+   - Problem Understanding & Architectural Flow
+   - Approach (Brute force -> Modular Optimal Solution)
+   - Optimized Implementation (Single-file or Multi-file)
+   - Complexity Analysis
+   - Key Edge Cases & Production Considerations
 
 ###############################
 ## OUTPUT FORMAT RULES
@@ -391,8 +393,8 @@ Provide:
 ###############################
 
 ===APPROACH===
-- Ultra-concise problem summary and approach (maximum 1-2 bullet points, under 80 words total).
-- Keep approach, trade-offs, and dry-run talk points extremely brief.
+- Ultra-concise problem summary, high-level architecture, and approach (maximum 2-3 bullet points, under 100 words total).
+- Keep approach, module responsibilities, and dry-run talk points extremely brief and high-density.
 
 ===COMPLEXITY===
 Time: O(...) — explain in 5-10 words.
@@ -400,12 +402,20 @@ Space: O(...) — explain in 5-10 words.
 
 ===CODE===
 ```{lang}
-# Complete working solution in {lang} with correct imports and function signature.
-# Keep code clean, optimized, and compact.
+# Complete working solution in {lang}.
+# For multi-module / multi-file projects (e.g. RAG systems, modular services), separate files using comment headers:
+# === FILE: config.py ===
+# ...
+# === FILE: embeddings.py ===
+# ...
+# === FILE: retriever.py ===
+# ...
+
+# Keep code clean, fully import-complete, modular, and production-ready.
 ```
 
 ===EDGE_CASES===
-- List of 2-3 key edge cases to verify (under 30 words total).
+- List of 2-3 key edge cases or failure modes to verify (under 40 words total).
 
 Language for implementation: {lang}
 
@@ -435,14 +445,17 @@ VISION_SCREEN_PROMPT = """###############################
 ## SYSTEM IDENTITY
 ###############################
 
-You are a visual accessibility assistant helping a software developer with visual impairments navigate and interpret their workspace.
+You are an expert AI visual engineering assistant helping a software developer navigate, analyze, and solve technical coding assessments, IDE workspace windows, and architectural coding tasks visible on screen.
 
 ###############################
 ## VISION RULES
 ###############################
 
-1) Transcribe the question, options, or editor code visible in the screenshot.
-2) To assist the developer in choosing the correct navigation option, identify which statement(s) or choice(s) are correct and explain why.
+1) Inspect the entire visible workspace: problem statements, code editors, file trees/tabs, class definitions, test runner outputs, and diagrams visible in the screenshot.
+2) For coding tasks and multi-folder assessments (e.g. building RAG systems, API modules, data pipelines):
+   - Transcribe/summarize the requirements clearly.
+   - Design a modular, production-ready implementation spanning single or multiple files as required by the task.
+   - Demarcate multi-file code blocks using `# === FILE: path/to/file.ext ===` comment headers.
 3) Frame all advice in a professional, direct, and helpful tone.
 4) If there are any human faces, webcam video feeds, profile pictures, or avatars visible in the screenshot, IGNORE them completely. Do NOT describe or attempt to identify any person. You are strictly analyzing the technical text, diagrams, code, and questions in the main interface.
 
@@ -452,25 +465,23 @@ You are a visual accessibility assistant helping a software developer with visua
 ###############################
 
 ===PROBLEM===
-Copy the full problem statement, questions, or choices shown on screen verbatim.
+Copy the full problem statement, questions, or multi-file IDE context visible on screen.
 
 ===APPROACH===
-- If coding: Step-by-step logic, code structure, and explanation.
-- If non-coding/MCQ: Identify the correct statement/option verbatim with a brief explanation.
+- High-level logic, module structure, and architecture explanation.
 
 ===COMPLEXITY===
-- If coding: Time: O(...) and Space: O(...)
-- If non-coding: N/A
+- Time: O(...) and Space: O(...) (or N/A for conceptual questions)
 
 ===CODE===
 ```{lang}
-# Complete working solution in {lang} if it is a coding problem.
+# Complete working solution in {lang}.
+# If multi-file, separate modules with `# === FILE: path/to/file.ext ===` headers.
 # If non-coding, leave this block empty or N/A.
 ```
 
 ===EDGE_CASES===
-- If coding: List of edge cases.
-- If non-coding: N/A
+- List of 2-3 edge cases or verification steps.
 
 Language for implementation: {lang}
 """
@@ -661,49 +672,84 @@ def get_parsed_resume_context() -> str:
 
         # Basics
         basics = data.get("basics", {})
-        name = basics.get("name")
-        label = basics.get("label")
-        summary = basics.get("summary")
-        if name or label or summary:
-            parts.append("### CANDIDATE PROFILE")
-            if name: parts.append(f"Name: {name}")
-            if label: parts.append(f"Title/Role: {label}")
-            if summary: parts.append(f"Summary: {summary}")
-            parts.append("")
+        if isinstance(basics, dict):
+            name = basics.get("name")
+            label = basics.get("label")
+            email = basics.get("email")
+            summary = basics.get("summary")
+            if name or label or summary or email:
+                parts.append("### CANDIDATE PROFILE")
+                if name: parts.append(f"Name: {name}")
+                if label: parts.append(f"Title/Role: {label}")
+                if email: parts.append(f"Email: {email}")
+                if summary: parts.append(f"Summary: {summary}")
+                parts.append("")
 
         # Skills & Tech Keywords
         skills = data.get("skills", [])
-        if skills:
+        if isinstance(skills, list) and skills:
             parts.append("### TECHNICAL SKILLS & KEYWORDS")
             for skill in skills:
-                name_val = skill.get("name")
-                keywords = skill.get("keywords", [])
-                if name_val or keywords:
-                    kw_str = ", ".join(keywords) if keywords else "None"
-                    parts.append(f"- {name_val}: {kw_str}")
+                if isinstance(skill, dict):
+                    name_val = skill.get("name")
+                    keywords = skill.get("keywords", [])
+                    if name_val or keywords:
+                        kw_str = ", ".join(keywords) if isinstance(keywords, list) else str(keywords)
+                        parts.append(f"- {name_val}: {kw_str}")
             parts.append("")
 
         # Work Experience
         work = data.get("work", [])
-        if work:
+        if isinstance(work, list) and work:
             parts.append("### WORK EXPERIENCE")
             for job in work:
-                company = job.get("company")
-                position = job.get("position")
-                summary_val = job.get("summary")
-                highlights = job.get("highlights", [])
-                if company or position:
-                    parts.append(f"**{position}** at **{company}** ({job.get('startDate', '')} - {job.get('endDate', '')})")
-                    if summary_val:
-                        parts.append(f"  *Summary*: {summary_val}")
-                    for h in highlights[:4]:  # limit to top highlights
-                        parts.append(f"  - {h}")
+                if isinstance(job, dict):
+                    company = job.get("company", "")
+                    position = job.get("position", "")
+                    startDate = job.get("startDate", "")
+                    endDate = job.get("endDate", "")
+                    summary_val = job.get("summary", "")
+                    highlights = job.get("highlights", [])
+                    if company or position:
+                        parts.append(f"**{position}** at **{company}** ({startDate} - {endDate})")
+                        if summary_val:
+                            parts.append(f"  *Summary*: {summary_val}")
+                        if isinstance(highlights, list):
+                            for h in highlights:
+                                parts.append(f"  - {h}")
             parts.append("")
 
-        return "\n".join(parts).strip()
+        # Projects
+        projects = data.get("projects", [])
+        if isinstance(projects, list) and projects:
+            parts.append("### PROJECTS")
+            for proj in projects:
+                if isinstance(proj, dict):
+                    name = proj.get("name")
+                    desc = proj.get("description")
+                    if name:
+                        parts.append(f"**{name}**: {desc if desc else ''}")
+            parts.append("")
+
+        # Education
+        education = data.get("education", [])
+        if isinstance(education, list) and education:
+            parts.append("### EDUCATION")
+            for edu in education:
+                if isinstance(edu, dict):
+                    institution = edu.get("institution")
+                    area = edu.get("area")
+                    studyType = edu.get("studyType")
+                    if institution:
+                        parts.append(f"- {studyType or ''} {area or ''} at {institution}")
+            parts.append("")
+
+        result = "\n".join(parts).strip()
+        return result if result else raw_resume
     except Exception:
         # Fallback to raw resume if JSON parsing fails
         return raw_resume
+
 
 
 def generate_answer(
@@ -774,7 +820,18 @@ def generate_answer(
                 role=config.JOB_ROLE,
                 job_desc=job_desc,
             )
-            user_msg = f"Interviewer asked:\n{question}"
+            candidate_context = (
+                f"Resume:\n{resume}\n\n"
+                f"Self-introduction:\n{intro}\n\n"
+                f"Project overview:\n{project_overview}\n\n"
+                f"Target role:\n{config.JOB_ROLE}\n{job_desc}"
+            )
+            user_msg = build_interview_user_prompt(
+                question=question,
+                conversation=conversation,
+                candidate_context=candidate_context,
+                max_turns=5,
+            )
             max_tokens = 250
             temperature = 0.4
 
@@ -1206,3 +1263,121 @@ def _extract_problem_fallback(raw: str) -> str:
         if text.upper() != "NO_PROBLEM":
             return text
     return ""
+
+
+ASSESSMENT_MODE_SYSTEM_PROMPT = """###############################
+## SYSTEM IDENTITY
+###############################
+
+You are a coding expert helping me in my project. I will give you the project structure and I will give you my current existing code as screenshots and you will analyze and give me the code for the files given in the file structure. I need ONLY the code in assessment mode and NO explanations.
+
+###############################
+## STRICT ASSESSMENT MODE RULES
+###############################
+
+1. Output ONLY production-ready code blocks for the files in the project structure.
+2. For each file, format with explicit comment headers: `# === FILE: path/to/filename.ext ===` before its code block.
+3. Do NOT provide any conversational intro, prose explanations, tutorials, edge case bullet points, or concluding text. Output pure code only.
+"""
+
+
+def solve_assessment_multi_image(
+    images_jpeg: list[bytes],
+    detail: str = "high",
+    on_chunk: Callable[[ParsedResponse], None] = None,
+    is_cancelled: Callable[[], bool] = None,
+) -> Tuple[str, ParsedResponse]:
+    """Process multiple queued screenshots (project structure & code files) and output pure code."""
+    if not images_jpeg:
+        empty_resp = ParsedResponse(
+            is_coding=True,
+            approach="Assessment Mode: No screenshots captured.",
+            code="",
+            complexity="",
+            edge_cases="",
+            full_text="Assessment Mode: No screenshots captured.",
+            problem_text="No screenshots provided.",
+        )
+        return "No screenshots provided.", empty_resp
+
+    lang = config.CODE_LANGUAGE
+    b64_list = [base64.standard_b64encode(img).decode("ascii") for img in images_jpeg]
+
+    user_content = [
+        {
+            "type": "text",
+            "text": (
+                f"Analyze all {len(images_jpeg)} provided screenshots (project structure and existing code files). "
+                f"Generate the full production implementation in {lang} for the files in the file structure. "
+                "Output ONLY the code using `# === FILE: path/to/file.ext ===` comment headers for each file. "
+                "Provide ZERO explanations or conversational text."
+            ),
+        }
+    ]
+    for b64 in b64_list:
+        user_content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{b64}",
+                "detail": detail,
+            },
+        })
+
+    raw_text = ""
+    try:
+        print(f"[openai_service] Sending {len(images_jpeg)} screenshots to OpenAI Vision for Assessment Mode...", flush=True)
+        client = _client()
+        response = client.chat.completions.create(
+            model=config.OPENAI_VISION_MODEL,
+            messages=[
+                {"role": "system", "content": ASSESSMENT_MODE_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=0.1,
+            max_tokens=4000,
+            stream=True,
+        )
+
+        for chunk in response:
+            if is_cancelled and is_cancelled():
+                break
+            delta = chunk.choices[0].delta.content or ""
+            raw_text += delta
+
+            if on_chunk:
+                clean_code = _strip_code_fences(raw_text)
+                temp_parsed = ParsedResponse(
+                    is_coding=True,
+                    approach="",
+                    code=clean_code,
+                    complexity="N/A",
+                    edge_cases="N/A",
+                    full_text=raw_text,
+                    problem_text=f"Assessment session with {len(images_jpeg)} captured screenshot(s).",
+                )
+                on_chunk(temp_parsed)
+
+        clean_code = _strip_code_fences(raw_text)
+        final_parsed = ParsedResponse(
+            is_coding=True,
+            approach="",
+            code=clean_code,
+            complexity="N/A",
+            edge_cases="N/A",
+            full_text=raw_text,
+            problem_text=f"Assessment session with {len(images_jpeg)} captured screenshot(s).",
+        )
+        return "Multi-screenshot assessment completed.", final_parsed
+
+    except Exception as exc:
+        print(f"[openai_service] Multi-image vision assessment call failed: {exc}", flush=True)
+        err_parsed = ParsedResponse(
+            is_coding=True,
+            approach=f"Error processing assessment screenshots: {exc}",
+            code="",
+            complexity="",
+            edge_cases="",
+            full_text=f"Error processing assessment screenshots: {exc}",
+            problem_text="Assessment error.",
+        )
+        return "Assessment error.", err_parsed

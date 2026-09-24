@@ -19,8 +19,8 @@ def load_pdf_contexts() -> str:
     project_root = Path(__file__).resolve().parent.parent
     pdf_texts = []
     
-    # Scan project root and copilot_app directories
-    dirs_to_scan = [project_root, project_root / "copilot_app"]
+    # Scan project root and wboxai_app directories
+    dirs_to_scan = [project_root, project_root / "wboxai_app"]
     pdf_paths = []
     for d in dirs_to_scan:
         if d.is_dir():

@@ -25,6 +25,14 @@ class AudioSTTConfig:
     stt_model: str = "iic/SenseVoiceSmall"
     language: str = "auto"
     partial_interval_ms: int = 500
+    question_confidence_threshold: float = 0.55
+    role_confidence_threshold: float = 0.58
+    question_dedup_threshold: float = 0.86
+    llm_trigger_confidence_threshold: float = 0.45
+    context_turn_count: int = 5
+    diarization_provider: str = "source_metadata"
+    diarization_model: str = ""
+    pyannote_auth_token: str = ""
     enable_aec: bool = True
     enable_ns: bool = True
     enable_agc: bool = True
@@ -51,6 +59,16 @@ class AudioSTTConfig:
             raise ValueError("vad_threshold must be between 0 and 1")
         if self.partial_interval_ms < 100:
             raise ValueError("partial_interval_ms must be at least 100")
+        if not 0.0 < self.question_confidence_threshold <= 1.0:
+            raise ValueError("question_confidence_threshold must be between 0 and 1")
+        if not 0.0 < self.role_confidence_threshold <= 1.0:
+            raise ValueError("role_confidence_threshold must be between 0 and 1")
+        if not 0.0 < self.question_dedup_threshold <= 1.0:
+            raise ValueError("question_dedup_threshold must be between 0 and 1")
+        if not 0.0 < self.llm_trigger_confidence_threshold <= 1.0:
+            raise ValueError("llm_trigger_confidence_threshold must be between 0 and 1")
+        if self.context_turn_count < 1:
+            raise ValueError("context_turn_count must be at least 1")
 
     @property
     def frame_samples(self) -> int:

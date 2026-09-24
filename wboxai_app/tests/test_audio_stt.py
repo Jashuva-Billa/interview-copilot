@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Bootstrap paths before importing packages
 _root = Path(__file__).resolve().parents[2]
-for _p in (_root, _root / "copilot_app", _root / "audio_processing", _root / "llm_project"):
+for _p in (_root, _root / "wboxai_app", _root / "audio_processing", _root / "llm_project"):
     _p_str = str(_p.resolve())
     if _p_str not in sys.path:
         sys.path.insert(0, _p_str)

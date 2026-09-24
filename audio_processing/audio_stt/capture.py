@@ -111,7 +111,7 @@ class RobustMicrophoneSource:
 
         # Check if it's a loopback device before querying as standard input
         is_loopback = False
-        if device_id is not None and not isinstance(device_id, str) and sys.platform != "darwin":
+        if device_id is not None and not isinstance(device_id, str):
             try:
                 import pyaudiowpatch as pyaudio
                 p = pyaudio.PyAudio()
@@ -154,7 +154,7 @@ class RobustMicrophoneSource:
 
     def _open_stream(self, device_id: int | str | None, label: str) -> None:
         is_loopback = False
-        if device_id is not None and not isinstance(device_id, str) and sys.platform != "darwin":
+        if device_id is not None and not isinstance(device_id, str):
             try:
                 import pyaudiowpatch as pyaudio
                 p = pyaudio.PyAudio()

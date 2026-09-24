@@ -1,4 +1,4 @@
-"""Frosted glass backdrop — Windows acrylic / macOS vibrancy when available."""
+"""Frosted glass backdrop — Windows acrylic/blur via SetWindowCompositionAttribute."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def _abgr_tint(percent: float) -> int:
 
 
 def _apply_windows_blur(hwnd: int, blur_percent: float) -> bool:
-    if sys.platform != "win32" or not hwnd:
+    if not hwnd:
         return False
     try:
         import ctypes
@@ -71,46 +71,10 @@ def _apply_windows_blur(hwnd: int, blur_percent: float) -> bool:
         return False
 
 
-def _apply_macos_vibrancy(widget: Any, blur_percent: float) -> bool:
-    if sys.platform != "darwin" or blur_percent <= 0:
-        return False
-    try:
-        import objc
-        from ctypes import c_void_p
-
-        from Cocoa import NSVisualEffectMaterialHUDWindow, NSVisualEffectStateActive
-
-        wid = _native_hwnd(widget)
-        if not wid:
-            return False
-        obj = objc.objc_object(c_void_p=wid)
-        ns_window = obj.window()
-        if ns_window is None:
-            return False
-        content = ns_window.contentView()
-        if content is None:
-            return False
-        from AppKit import NSVisualEffectView
-
-        effect = NSVisualEffectView.alloc().initWithFrame_(content.bounds())
-        effect.setMaterial_(NSVisualEffectMaterialHUDWindow)
-        effect.setState_(NSVisualEffectStateActive)
-        effect.setBlendingMode_(0)
-        effect.setAlphaValue_(max(0.05, min(1.0, blur_percent / 100.0)))
-        content.addSubview_positioned_relativeTo_(effect, 0, None)
-        return True
-    except Exception:
-        return False
-
-
 def apply_glass_backdrop(widget: Any, blur_percent: float | None = None) -> bool:
-    """Enable OS-level blur; blur_percent 0–100 (default from config, e.g. 0.5)."""
+    """Enable Windows OS-level blur; blur_percent 0–100 (default from config, e.g. 0.5)."""
     import config
 
     pct = config.GLASS_BLUR_PERCENT if blur_percent is None else blur_percent
     hwnd = _native_hwnd(widget)
-    if sys.platform == "win32":
-        return _apply_windows_blur(hwnd, pct)
-    if sys.platform == "darwin" and pct > 0:
-        return _apply_macos_vibrancy(widget, pct)
-    return False
+    return _apply_windows_blur(hwnd, pct)

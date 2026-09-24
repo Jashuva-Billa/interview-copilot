@@ -68,17 +68,6 @@ def _probe_input_device(device_id: Optional[int]) -> bool:
         return False
 
 
-def _find_mac_virtual_input() -> Optional[int]:
-    """BlackHole / Soundflower on macOS for system audio capture."""
-    for i, dev in enumerate(sd.query_devices()):
-        name = dev.get("name", "").lower()
-        if dev.get("max_input_channels", 0) < 1:
-            continue
-        if "blackhole" in name or "soundflower" in name or "loopback" in name:
-            return i
-    return None
-
-
 def _windows_loopback_candidates() -> list[int]:
     """
     Prefer WDM-KS 'PC Speaker' — captures Meet/Zoom audio from speakers.
@@ -174,9 +163,6 @@ class WasapiLoopbackStream:
 
 
 def _find_loopback_device() -> Optional[int]:
-    if config.IS_MAC:
-        return _find_mac_virtual_input()
-
     try:
         import pyaudiowpatch as pyaudio
         p = pyaudio.PyAudio()
@@ -294,7 +280,7 @@ class SpeechRecorder:
             kwargs["device"] = self._device
         # Do NOT pass WasapiSettings on WDM-KS / Stereo Mix — it breaks the stream.
 
-        if self._loopback and not config.IS_MAC:
+        if self._loopback:
             self._stream = WasapiLoopbackStream(
                 device_index=self._device,
                 target_rate=SAMPLE_RATE,

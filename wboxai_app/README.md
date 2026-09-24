@@ -10,6 +10,18 @@ AI-powered interview assistant with a **transparent overlay** that shows suggest
 - **Coding interview mode** for CoderPad / HackerRank / LeetCode-style problems:
   - Auto-detects coding questions from speech
   - Shows **what to say** (approach) + **copy-paste code** in a separate panel
+# Interview Copilot
+
+AI-powered interview assistant with a **transparent overlay** that shows suggested answers while you are on a video call. On Windows, the overlay uses **capture exclusion** so it stays **visible to you** but is **not included** when you share your screen in Zoom, Teams, or Google Meet.
+
+## Features
+
+- Listens to **interviewer audio** via system loopback (WASAPI) — what plays through your speakers from the call
+- Transcribes speech with **OpenAI Whisper**
+- Generates concise, speakable answers with **GPT** using your resume context
+- **Coding interview mode** for CoderPad / HackerRank / LeetCode-style problems:
+  - Auto-detects coding questions from speech
+  - Shows **what to say** (approach) + **copy-paste code** in a separate panel
   - **Paste problem** button when the prompt is only on screen
 - **Transparent, draggable** always-on-top window
 - **Hidden from screen share** on Windows 10 version 2004+ (`SetWindowDisplayAffinity`)
@@ -18,10 +30,9 @@ AI-powered interview assistant with a **transparent overlay** that shows suggest
 
 | Platform | Supported |
 |----------|-----------|
-| **Windows 10/11** | Full — screen-share invisible overlay, loopback audio |
-| **macOS** | Full — invisible overlay (needs `pyobjc`), mic or BlackHole audio |
-| Python 3.10+ | Both |
-| OpenAI API key | Both |
+| **Windows 10/11** | Full — screen-share invisible overlay, WASAPI loopback audio |
+| Python 3.10+ | Supported |
+| OpenAI / Gemini / Claude API key | Supported |
 
 Headphones recommended on Windows loopback.
 
@@ -60,15 +71,9 @@ Do not run `python main.py` from another project's activated venv.
 
 3. Run:
 
-   **Windows**
    ```powershell
-   .\scripts\run.ps1
-   ```
-
-   **macOS**
-   ```bash
-   chmod +x scripts/run.sh
-   ./scripts/run.sh
+   .\run.bat
+   # or: .\venv\Scripts\python.exe run_app.py
    ```
 
 4. Join your interview on the laptop. Position the overlay on a second monitor or corner of the screen.
@@ -94,8 +99,8 @@ Heavy work (screenshots, OpenAI) runs in a **background thread**. The UI thread 
 
 | Mode | `.env` | Use when |
 |------|--------|----------|
-| Loopback | `AUDIO_SOURCE=loopback` | **Default on Windows** — captures interviewer from **speakers** (PC Speaker device) |
-| Microphone | `AUDIO_SOURCE=microphone` | Mac without BlackHole, or if loopback fails |
+| Loopback | `AUDIO_SOURCE=loopback` | **Default on Windows** — captures interviewer from **speakers** (WASAPI / PC Speaker) |
+| Microphone | `AUDIO_SOURCE=microphone` | Captures through microphone input |
 
 **For Meet interviews on Windows:**
 
@@ -128,7 +133,7 @@ Microphone -> 16 kHz mono framing -> enhancement (APM/fallback DSP) -> VAD
 
 Key properties:
 
-- Cross-platform capture path for Windows and macOS
+- Robust capture path for Windows 10/11
 - Automatic microphone recovery on device changes
 - Bounded queues and buffers to prevent unbounded memory growth
 - Pluggable components (capture, enhancement, VAD, STT provider)
@@ -162,7 +167,7 @@ Notes:
 
 ## Screen sharing behavior
 
-The overlay is **invisible in screen share** on **Windows and macOS** (Zoom, Teams, Meet).
+The overlay is **invisible in screen share** on **Windows 10/11** (Zoom, Teams, Meet).
 
 With `OVERLAY_TRANSPARENT=true` (default), the overlay uses a **semi-transparent** panel so you can see through to your screen. Share-hide (`INVISIBLE_IN_SHARE=true`) is applied without stripping the layered window style. If the overlay still appears in a screen share on your PC, set `OVERLAY_TRANSPARENT=false` for an opaque panel (more reliable on some Windows builds).
 
@@ -251,11 +256,11 @@ interview-copilot/
   screen_capture.py    # Screenshot for Vision API
   screen_watcher.py    # Auto-scan on screen change
   response_parser.py   # Split approach / code sections
-  capture_exclude.py   # Windows + Mac screen-share hide
+  capture_exclude.py   # Windows screen-share hide
   win_capture_exclude.py
   requirements-audio-enterprise.txt
   config.py
-  scripts/run.sh       # macOS launcher
   resume_context.txt
-  scripts/run.ps1
+  run.bat              # Windows launcher
+  run_setup.bat        # Windows setup wizard
 ```

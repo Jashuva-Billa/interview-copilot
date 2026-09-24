@@ -17,6 +17,8 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 ENV_FILE = ROOT / ".env"
+if not ENV_FILE.is_file() and (ROOT.parent / ".env").is_file():
+    ENV_FILE = ROOT.parent / ".env"
 
 
 # Single source of truth — this file only
@@ -36,9 +38,12 @@ def _env_bool(name: str, default: str = "true") -> bool:
     return _env(name, default).lower() in ("1", "true", "yes")
 
 
-IS_WINDOWS = sys.platform == "win32"
-IS_MAC = sys.platform == "darwin"
-PLATFORM_NAME = "macOS" if IS_MAC else "Windows" if IS_WINDOWS else sys.platform
+if sys.platform != "win32":
+    raise SystemExit("Error: WboxAI is designed and supported exclusively for Windows (10/11).")
+
+IS_WINDOWS = True
+IS_MAC = False
+PLATFORM_NAME = "Windows"
 
 OPENAI_API_KEY = _env("OPENAI_API_KEY")
 OPENAI_TRANSCRIBE_MODEL = _env("OPENAI_TRANSCRIBE_MODEL", "whisper-1")
@@ -53,6 +58,14 @@ AUDIO_VAD_MODEL_PATH = _env("AUDIO_VAD_MODEL_PATH", "")
 AUDIO_ALLOW_FALLBACK = _env_bool("AUDIO_ALLOW_FALLBACK", "true")
 # If false, audio-to-text will never use OpenAI fallback.
 AUDIO_ALLOW_OPENAI_STT = _env_bool("AUDIO_ALLOW_OPENAI_STT", "false")
+AUDIO_DIARIZATION_PROVIDER = _env("AUDIO_DIARIZATION_PROVIDER", "source_metadata").lower()
+AUDIO_DIARIZATION_MODEL = _env("AUDIO_DIARIZATION_MODEL", "")
+PYANNOTE_AUTH_TOKEN = _env("PYANNOTE_AUTH_TOKEN", "")
+QUESTION_CONFIDENCE_THRESHOLD = float(_env("QUESTION_CONFIDENCE_THRESHOLD", "0.55"))
+ROLE_CONFIDENCE_THRESHOLD = float(_env("ROLE_CONFIDENCE_THRESHOLD", "0.58"))
+QUESTION_DEDUP_THRESHOLD = float(_env("QUESTION_DEDUP_THRESHOLD", "0.86"))
+LLM_TRIGGER_CONFIDENCE_THRESHOLD = float(_env("LLM_TRIGGER_CONFIDENCE_THRESHOLD", "0.45"))
+LLM_CONTEXT_TURN_COUNT = int(_env("LLM_CONTEXT_TURN_COUNT", "5"))
 SPEECH_TO_TEXT_SERVER_URL = _env("AUDIO_PROCESSING_SERVER_URL", _env("SPEECH_TO_TEXT_SERVER_URL", _env("DHWANI_SERVER_URL", "ws://127.0.0.1:8000")))
 SPEECH_TO_TEXT_PROVIDER = _env("AUDIO_PROCESSING_PROVIDER", _env("SPEECH_TO_TEXT_PROVIDER", _env("DHWANI_PROVIDER", "openai"))).lower()
 USE_LOCAL_LLM = _env_bool("USE_LOCAL_LLM", "false")
@@ -152,15 +165,16 @@ def env_file_path() -> Path:
 
 
 def resume_path() -> Path:
-    p = Path(_env("RESUME_CONTEXT_PATH", str(ROOT / "resume_context.txt")))
-    if not p.is_absolute():
-        p = ROOT / p
-    # Never read files outside this project folder
-    try:
-        p.resolve().relative_to(ROOT.resolve())
-    except ValueError:
-        p = ROOT / "resume_context.txt"
-    return p
+    env_p = _env("RESUME_CONTEXT_PATH", "")
+    if env_p:
+        p = Path(env_p)
+        if p.is_file():
+            return p
+    if (ROOT / "resume_context.txt").is_file():
+        return ROOT / "resume_context.txt"
+    if (ROOT.parent / "resume_context.txt").is_file():
+        return ROOT.parent / "resume_context.txt"
+    return ROOT / "resume_context.txt"
 
 
 RESUME_PATH = resume_path()
