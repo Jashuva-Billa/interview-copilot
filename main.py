@@ -126,8 +126,9 @@ class WorkerBridge(QObject):
     jpeg_ready = pyqtSignal(bytes, str)
     watch_jpeg_ready = pyqtSignal(bytes, bool)
     coding_busy = pyqtSignal(bool)
-    transcript = pyqtSignal(str, bool, float)
-    candidate_transcript = pyqtSignal(str, bool)
+    transcript = pyqtSignal(str, bool, float, object)  # text, is_final, latency_ms, speaker_id
+    candidate_transcript = pyqtSignal(str, bool, object) # text, is_final, speaker_id
+    live_transcript = pyqtSignal(str, str, bool)        # role, text, is_final
     listening_state = pyqtSignal(bool)
 
 
@@ -175,7 +176,9 @@ class InterviewApp:
         self.bridge.coding_busy.connect(self.window.set_coding_busy)
         self.bridge.transcript.connect(self._on_audio_transcript)
         self.bridge.candidate_transcript.connect(self._on_candidate_transcript)
+        self.bridge.live_transcript.connect(self.window.update_live_transcript)
         self.bridge.listening_state.connect(self.window.set_listening_state)
+
 
         self.window.listening_toggled.connect(self._on_listen_toggle)
         self.window.force_coding_requested.connect(self._on_force_coding)
@@ -722,6 +725,7 @@ class InterviewApp:
                         event.transcript.text,
                         event.transcript.is_final,
                         event.transcript.latency_ms or 0.0,
+                        getattr(event.transcript, "speaker_id", None),
                     )
                 elif event.kind == EventKind.DEVICE_CHANGED:
                     self.bridge.status.emit(f"Interviewer mic: {event.message}")
@@ -743,6 +747,7 @@ class InterviewApp:
                     self.bridge.candidate_transcript.emit(
                         event.transcript.text,
                         event.transcript.is_final,
+                        getattr(event.transcript, "speaker_id", None),
                     )
                 elif event.kind == EventKind.DEVICE_CHANGED:
                     self.bridge.status.emit(f"Candidate mic: {event.message}")
@@ -785,6 +790,7 @@ class InterviewApp:
                         event.transcript.text,
                         event.transcript.is_final,
                         event.transcript.latency_ms or 0.0,
+                        getattr(event.transcript, "speaker_id", None),
                     )
                 elif event.kind == EventKind.DEVICE_CHANGED:
                     self.bridge.status.emit(f"Interviewer mic: {event.message}")
@@ -806,11 +812,13 @@ class InterviewApp:
                     self.bridge.candidate_transcript.emit(
                         event.transcript.text,
                         event.transcript.is_final,
+                        getattr(event.transcript, "speaker_id", None),
                     )
                 elif event.kind == EventKind.DEVICE_CHANGED:
                     self.bridge.status.emit(f"Candidate mic: {event.message}")
                 elif event.kind in (EventKind.WARNING, EventKind.ERROR):
                     self.bridge.status.emit(f"Candidate audio error: {event.message}")
+
 
             candidate_pipeline.subscribe(on_candidate_event)
             self.candidate_pipeline = candidate_pipeline
@@ -882,123 +890,120 @@ class InterviewApp:
             source=metadata,
         )
 
-    def _on_audio_transcript(self, text: str, is_final: bool, latency_ms: float = 0.0) -> None:
+    def _on_audio_transcript(
+        self,
+        text: str,
+        is_final: bool,
+        latency_ms: float = 0.0,
+        speaker_id: int | str | None = None,
+    ) -> None:
         text = text.strip()
         if not text:
             return
-
-        # Filter out candidate voice captured on the loopback system audio
-        if self._recent_candidate_speech:
-            is_candidate_voice = False
-            for cand_text in self._recent_candidate_speech:
-                if self._get_word_similarity(text, cand_text) > 0.45:
-                    is_candidate_voice = True
-                    break
-            if is_candidate_voice:
-                if is_final:
-                    print(f"[main] Discarded candidate speech from interviewer stream: '{text}'", flush=True)
-                return
-
-        if is_final:
-            from latency_tracker import tracker
-            tracker.record_stt(text, is_final, latency_ms)
 
         now = time.time()
-        is_partial = not is_final
-        if is_partial:
-            # Word count check
-            words = text.split()
-            if len(words) < 3:
-                self.window.status_changed.emit(f"Hearing: {text[-90:]}")
-                return
-            # Check if we have added at least 2 words since last submitted partial text
-            last_words = self._last_submitted_text.split()
-            if len(words) - len(last_words) < 2:
-                self.window.status_changed.emit(f"Hearing: {text[-90:]}")
-                return
-            # Throttle to at most once every 600ms
-            if now - self._last_partial_submit_time < 0.6:
-                self.window.status_changed.emit(f"Hearing: {text[-90:]}")
-                return
 
-            self._last_partial_submit_time = now
-            self._last_submitted_text = text
+        # 1. Partial transcript handling
+        if not is_final:
             self.window.status_changed.emit(f"Hearing: {text[-90:]}")
-        else:
-            self._last_submitted_text = ""
-            self._last_partial_submit_time = 0.0
+            self.bridge.live_transcript.emit("Hearing", text, False)
+            return
 
-        if is_final:
-            segment = self._structured_transcript(
-                text,
-                True,
-                AudioSourceKind.SYSTEM,
-                latency_ms,
-            )
-            decision = self.question_processor.process_transcript(segment)
-            if decision.turn is not None:
-                role_label = (
-                    "Interviewer"
-                    if decision.turn.role == SpeakerRole.INTERVIEWER
-                    else "Candidate"
-                    if decision.turn.role == SpeakerRole.CANDIDATE
-                    else "Unknown"
-                )
-                from latency_tracker import tracker
-                tracker.record_dialogue(role_label, decision.turn.text)
-                if decision.turn.role == SpeakerRole.INTERVIEWER:
-                    self.window.set_question(decision.turn.text)
+        # 2. Final transcript handling
+        spk_display = str(speaker_id) if speaker_id is not None else "unknown"
+        role, role_conf = self.question_processor.roles.resolve(
+            self.question_processor.state,
+            speaker_id if speaker_id is not None else "UNKNOWN",
+            AudioSourceKind.SYSTEM,
+            text,
+            False,
+        )
 
-            if decision.question is None:
-                self.window.status_changed.emit(f"Listening — {decision.reason}")
-                return
+        role_str = role.value.lower()
+        print(f"[ROLE] speaker={spk_display} -> {role_str}", flush=True)
 
-            llm_input = decision.question.to_llm_input()
-            display_text = llm_input["question"]
-            self._last_final_question = display_text
-            self._last_question_time = now
-            self.window.set_question(display_text)
+        if role == SpeakerRole.CANDIDATE:
+            print(f"[CANDIDATE]\n{text}\n", flush=True)
+            self.bridge.live_transcript.emit("Candidate", text, True)
+            with self._generation_lock:
+                self.conversation.append({"role": "user", "content": f"[Candidate] {text}"})
+            return
 
-            force = self._force_next_coding
-            self._force_next_coding = False
-            self._generation_request_id += 1
-            self.executor.submit(
-                self._generate_for_question,
-                display_text,
-                force,
-                self._generation_request_id,
-                True,
-            )
+        if role == SpeakerRole.UNKNOWN:
+            print(f"[UNKNOWN]\n{text}\n", flush=True)
+            self.bridge.live_transcript.emit("Unknown", text, True)
+            self.window.status_changed.emit("Speaker role uncertain")
+            return
 
-    def _on_candidate_transcript(self, text: str, is_final: bool) -> None:
+        # Role is INTERVIEWER
+        print(f"[INTERVIEWER]\n{text}\n", flush=True)
+        self.bridge.live_transcript.emit("Interviewer", text, True)
+
+        # Question Detection
+        detection = self.question_processor.questions.detect(text)
+        print(f"[QUESTION DETECTOR] question={detection.is_question}", flush=True)
+
+        if not detection.is_question:
+            self.window.status_changed.emit("Listening — interviewer statement recorded")
+            with self._generation_lock:
+                self.conversation.append({"role": "user", "content": f"[Interviewer] {text}"})
+            return
+
+        # Deduplication
+        question_text = detection.text
+        if self.question_processor.deduper.is_duplicate(question_text):
+            print(f"[DEDUPLICATOR] Duplicate question ignored: '{question_text}'", flush=True)
+            return
+
+        print(f"[QUESTION]\n{question_text}\n", flush=True)
+
+        # Update Question UI immediately
+        self._last_final_question = question_text
+        self._last_question_time = now
+        self.window.set_question(question_text)
+        self.window.status_changed.emit("Generating answer...")
+        print("[LLM] generating answer...", flush=True)
+
+        with self._generation_lock:
+            self.conversation.append({"role": "user", "content": question_text})
+
+        force = self._force_next_coding
+        self._force_next_coding = False
+        self._generation_request_id += 1
+        self.executor.submit(
+            self._generate_for_question,
+            question_text,
+            force,
+            self._generation_request_id,
+            True,
+        )
+
+    def _on_candidate_transcript(
+        self,
+        text: str,
+        is_final: bool,
+        speaker_id: int | str | None = None,
+    ) -> None:
         text = text.strip()
         if not text:
             return
-        self.window.status_changed.emit(f"You said: {text[-90:]}")
+
+        spk_str = str(speaker_id) if speaker_id is not None else "CANDIDATE_MIC"
+        self.question_processor.roles.calibrate_candidate(spk_str)
 
         if not is_final:
+            self.bridge.live_transcript.emit("Candidate", text, False)
+            self.window.status_changed.emit(f"You said: {text[-90:]}")
             return
 
-        segment = self._structured_transcript(text, True, AudioSourceKind.MICROPHONE)
-        decision = self.question_processor.process_transcript(segment)
-        final_text = decision.turn.text if decision.turn is not None else text
-
-        from latency_tracker import tracker
-        tracker.record_dialogue("Candidate", final_text)
-        
-        try:
-            from token_tracker import tracker_instance
-            tracker_instance.record_candidate_speech(text)
-        except Exception:
-            pass
-
-        self._recent_candidate_speech.append(final_text)
-        if len(self._recent_candidate_speech) > 5:
-            self._recent_candidate_speech.pop(0)
+        print(f"[ROLE] speaker={spk_str} -> candidate", flush=True)
+        print(f"[CANDIDATE]\n{text}\n", flush=True)
+        self.bridge.live_transcript.emit("Candidate", text, True)
+        self.window.status_changed.emit("Candidate speech recorded")
 
         with self._generation_lock:
-            self.conversation.append({"role": "assistant", "content": final_text})
-            print(f"[candidate] answer saved to history: '{final_text}'", flush=True)
+            self.conversation.append({"role": "user", "content": f"[Candidate] {text}"})
+
 
     def _stop_listening(self) -> None:
         if self.audio_pipeline is not None:
@@ -1107,22 +1112,9 @@ class InterviewApp:
                 f"Generating {'coding solution' if coding else 'answer'}..."
             )
 
-            if request_id < self._generation_request_id:
-                return
-
-            start_time = time.perf_counter()
-            ttft_ms = None
-
-            def is_cancelled():
-                return request_id < self._generation_request_id
-
-            def on_chunk(provider, parsed_resp):
-                nonlocal ttft_ms
-                if is_cancelled():
-                    return
-                if ttft_ms is None:
-                    ttft_ms = (time.perf_counter() - start_time) * 1000
-                self.bridge.answer.emit({"provider": provider, "response": parsed_resp})
+            print("[LLM] Starting answer generation...", flush=True)
+            print(f"[LLM] Question: {text}", flush=True)
+            print("[LLM] Calling OpenAI...", flush=True)
 
             responses = generate_answer(
                 text,
@@ -1134,34 +1126,45 @@ class InterviewApp:
 
             tgt_ms = (time.perf_counter() - start_time) * 1000
 
-            with self._generation_lock:
-                if request_id < self._generation_request_id:
-                     return
+            if responses:
+                print("[LLM] Response received", flush=True)
+                primary = "openai" if "openai" in responses else list(responses.keys())[0]
+                primary_response = responses[primary]
+                resp_text = primary_response.approach or primary_response.full_text
+                print(f"[LLM] Response length: {len(resp_text)}", flush=True)
+                print(f"[ANSWER]\n{resp_text}\n", flush=True)
 
-                if responses:
-                    # Emit final response for all providers to ensure UI consistency
-                    for provider, resp in responses.items():
-                        self.bridge.answer.emit({"provider": provider, "response": resp})
+                # Emit final response for all providers to ensure UI consistency
+                for provider, resp in responses.items():
+                    self.bridge.answer.emit({"provider": provider, "response": resp})
+                print("[UI] Answer emitted", flush=True)
 
-                    primary = "openai" if "openai" in responses else list(responses.keys())[0]
-                    primary_response = responses[primary]
+                if is_final:
+                    self.conversation.append({"role": "user", "content": text})
+                    self.conversation.append(
+                        {"role": "assistant", "content": primary_response.full_text}
+                    )
+                    from latency_tracker import tracker
+                    tracker.record_llm(text, ttft_ms or tgt_ms, tgt_ms)
+            else:
+                print("[LLM] No response received from providers", flush=True)
 
-                    if is_final:
-                        self.conversation.append({"role": "user", "content": text})
-                        self.conversation.append(
-                            {"role": "assistant", "content": primary_response.full_text}
-                        )
-                        from latency_tracker import tracker
-                        tracker.record_llm(text, ttft_ms or tgt_ms, tgt_ms)
-
-                self.bridge.status.emit("Ready — listening...")
+            self.bridge.status.emit("Ready — listening...")
         except Exception as e:
-            self.bridge.error.emit(format_api_error(e))
+            print(f"[LLM][ERROR] {e}", flush=True)
+            err_str = format_api_error(e)
+            self.bridge.status.emit(f"Unable to generate answer: {err_str}")
+            self.bridge.error.emit(err_str)
+            from llm_project.response_parser import parse_structured_response
+            error_response = parse_structured_response(f"Unable to generate answer: {err_str}", False)
+            for provider in config.get_active_providers():
+                self.bridge.answer.emit({"provider": provider, "response": error_response})
             traceback.print_exc()
         finally:
             self._busy = False
             if force_coding:
                 self.bridge.coding_busy.emit(False)
+
 
     def run(self) -> int:
         self.app.setQuitOnLastWindowClosed(False)

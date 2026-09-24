@@ -761,7 +761,6 @@ def generate_answer(
     is_screen_scan: bool = False,
 ) -> ParsedResponse:
     coding = should_use_coding_mode(question, force_coding)
-    client = _client()
     resume = get_parsed_resume_context()
     intro = config.load_intro_context() or "(No self-introduction loaded — add intro_context.txt)"
     project_overview = config.load_project_overview_context() or "(No project overview context loaded)"
@@ -881,7 +880,7 @@ def generate_answer(
                 client_obj = local_client
                 model_name = fallback_model
             else:
-                client_obj = client
+                client_obj = _client()
                 model_name = config.OPENAI_CHAT_MODEL
 
             resp = client_obj.chat.completions.create(

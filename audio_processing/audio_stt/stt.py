@@ -400,16 +400,18 @@ class SpeechToTextSTTProvider:
             deepgram_key=deepgram_key,
         )
 
-        async def handler_callback(raw_text: str, is_final: bool = True):
+        async def handler_callback(
+            raw_text: str,
+            is_final: bool = True,
+            speaker_id: int | None = None,
+            confidence: float | None = None,
+        ):
             if not raw_text:
                 return
-
-            print(f"[speech-to-text] handler_callback raw text received (is_final={is_final}): '{raw_text}'")
 
             # Emit raw text as partial transcript immediately
             if not is_final:
                 if self._callback:
-                    print(f"[speech-to-text] Emitting partial transcript: '{raw_text}'")
                     partial_latency = ((monotonic_ns() - self._started_at_ns) / 1_000_000) if self._started_at_ns > 0 else 0.0
                     self._callback(
                         Transcript(
@@ -418,7 +420,9 @@ class SpeechToTextSTTProvider:
                             utterance_id=self._utterance_id or "speech-to-text-utterance",
                             started_at_ns=self._started_at_ns,
                             provider="speech_to_text",
-                            latency_ms=partial_latency
+                            latency_ms=partial_latency,
+                            speaker_id=speaker_id,
+                            confidence=confidence,
                         )
                     )
                 return
@@ -431,16 +435,13 @@ class SpeechToTextSTTProvider:
             import openai_service
             if not getattr(self._config, "disable_llm_cleaning", True) and not getattr(openai_service, "_use_local_fallback_directly", False):
                 try:
-                    print(f"[speech-to-text] Running LLM cleaning for raw text...", flush=True)
                     cleaned_val = await llm_cleaning(self._raw_transcript_history, raw_text)
-                    print(f"[speech-to-text] Cleaned result: '{cleaned_val}'", flush=True)
                     if cleaned_val == "[SILENCE]":
                         cleaned_val = raw_text
                 except Exception as e:
-                    print(f"[speech-to-text] Error during in-process LLM cleaning: {e}", flush=True)
+                    log.debug("Error during in-process LLM cleaning: %s", e)
                     cleaned_val = raw_text
             else:
-                # Bypassing LLM cleaning or in local fallback mode
                 pass
 
             if cleaned_val and cleaned_val != "[SILENCE]":
@@ -450,7 +451,6 @@ class SpeechToTextSTTProvider:
                 cleaned_val = cleaned_val.replace(" ,", ",")
 
             if self._callback:
-                print(f"[speech-to-text] Emitting final transcript: '{cleaned_val}'", flush=True)
                 final_latency = ((monotonic_ns() - self._started_at_ns) / 1_000_000) if self._started_at_ns > 0 else 0.0
                 self._callback(
                     Transcript(
@@ -460,9 +460,12 @@ class SpeechToTextSTTProvider:
                         started_at_ns=self._started_at_ns,
                         ended_at_ns=monotonic_ns(),
                         provider="speech_to_text",
-                        latency_ms=final_latency
+                        latency_ms=final_latency,
+                        speaker_id=speaker_id,
+                        confidence=confidence,
                     )
                 )
+
 
         try:
             await stt_provider_instance.process_audio_stream(self._audio_queue, handler_callback)

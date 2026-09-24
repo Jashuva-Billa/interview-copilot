@@ -775,6 +775,13 @@ class OverlayWindow(QMainWindow):
         self.status_label.setObjectName("status")
         layout.addWidget(self.status_label)
 
+        layout.addWidget(QLabel("Live Transcript", objectName="section"))
+        self.live_transcript_box = QTextEdit()
+        self.live_transcript_box.setReadOnly(True)
+        self.live_transcript_box.setMaximumHeight(64)
+        self._make_see_through_edit(self.live_transcript_box)
+        layout.addWidget(self.live_transcript_box)
+
         layout.addWidget(QLabel("Question / problem", objectName="section"))
         self.question_box = QTextEdit()
         self.question_box.setReadOnly(True)
@@ -1252,9 +1259,28 @@ class OverlayWindow(QMainWindow):
         self.refresh_requested.emit()
         self.schedule_exclude()
 
+    def update_live_transcript(self, role: str, text: str, is_final: bool = True) -> None:
+        role_formatted = role.strip().capitalize() if role else "Unknown"
+        if not is_final:
+            line = f"[{role_formatted} speaking...] {text}"
+        else:
+            line = f"[{role_formatted}] {text}"
+        
+        current = self.live_transcript_box.toPlainText().strip()
+        if is_final:
+            new_content = f"{current}\n{line}".strip() if current else line
+            lines = new_content.splitlines()[-10:]
+            self._set_plain_text_autoscroll(self.live_transcript_box, "\n".join(lines))
+        else:
+            lines = current.splitlines()[-8:] if current else []
+            display = "\n".join(lines + [line]).strip()
+            self.live_transcript_box.setPlainText(display)
+            self._scroll_to_bottom(self.live_transcript_box)
+
     def clear_responses(self) -> None:
         self._last_question = ""
         self.question_box.clear()
+        self.live_transcript_box.clear()
         if hasattr(self, "_last_responses"):
             self._last_responses.clear()
         for provider, col in self.columns.items():
@@ -1521,6 +1547,9 @@ class OverlayWindow(QMainWindow):
     def set_question(self, text: str) -> None:
         self._last_question = text
         self._set_plain_text_autoscroll(self.question_box, text)
+        for col in self.columns.values():
+            if not self.btn_coding.isChecked() and not self.btn_assessment.isChecked():
+                self._set_plain_text_autoscroll(col["answer_box"], "Generating...")
 
     def get_last_question(self) -> str:
         return self._last_question

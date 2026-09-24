@@ -32,6 +32,8 @@ class Transcript:
     language: str | None = None
     provider: str = ""
     latency_ms: float | None = None
+    speaker_id: int | None = None
+    role: str = "UNKNOWN"
 
 
 @dataclass(frozen=True, slots=True)

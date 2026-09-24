@@ -23,6 +23,7 @@ class DeepgramProvider(STTProvider):
             with self.deepgram.listen.v1.connect(
                 model="nova-3",
                 smart_format=True,   # Maximum formatting/punctuation accuracy
+                diarize=True,        # Enable speaker diarization
                 encoding="linear16", # Tells Deepgram we stream raw PCM
                 sample_rate=16000,
                 channels=1,
@@ -36,12 +37,37 @@ class DeepgramProvider(STTProvider):
                     message = args[1] if len(args) > 1 else args[0]
                     try:
                         if hasattr(message, "channel") and hasattr(message.channel, "alternatives"):
-                            sentence = message.channel.alternatives[0].transcript
+                            alt = message.channel.alternatives[0]
+                            sentence = getattr(alt, "transcript", "")
                             if sentence and sentence.strip():
-                                print(f"Deepgram raw text: {sentence}")
                                 is_final = getattr(message, "is_final", False)
+                                confidence = getattr(alt, "confidence", None)
+                                speaker_id = None
+                                
+                                words = getattr(alt, "words", None) or []
+                                speakers = []
+                                for w in words:
+                                    spk = getattr(w, "speaker", None)
+                                    if spk is not None:
+                                        speakers.append(spk)
+                                    elif isinstance(w, dict) and w.get("speaker") is not None:
+                                        speakers.append(w.get("speaker"))
+                                
+                                if speakers:
+                                    speaker_id = max(set(speakers), key=speakers.count)
+                                else:
+                                    for obj in (message, alt, getattr(message, "channel", None)):
+                                        spk = getattr(obj, "speaker", None)
+                                        if spk is not None:
+                                            speaker_id = spk
+                                            break
+
+                                kind_str = "FINAL" if is_final else "PARTIAL"
+                                spk_str = f"speaker={speaker_id}" if speaker_id is not None else "speaker=unknown"
+                                print(f"[DEEPGRAM][{kind_str}][{spk_str}]\n{sentence}", flush=True)
+
                                 asyncio.run_coroutine_threadsafe(
-                                    handler_callback(sentence, is_final), loop
+                                    handler_callback(sentence, is_final, speaker_id, confidence), loop
                                 )
                     except Exception as e:
                         print(f"Deepgram message parse error: {e}")

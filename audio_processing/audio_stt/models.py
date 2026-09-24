@@ -23,6 +23,19 @@ class SpeakerRole(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class TranscriptEvent:
+    text: str
+    speaker_id: int | None = None
+    role: SpeakerRole = SpeakerRole.UNKNOWN
+    is_final: bool = True
+    confidence: float | None = None
+    timestamp: float | None = None
+    utterance_id: str = ""
+    provider: str = "deepgram"
+    latency_ms: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SourceMetadata:
     source: AudioSourceKind
     audio_chunk_id: str
@@ -49,6 +62,7 @@ class TranscriptSegment:
     provider: str = ""
     words: tuple[WordTimestamp, ...] = ()
     source: SourceMetadata | None = None
+    speaker_id: int | str | None = None
 
 
 @dataclass(frozen=True, slots=True)

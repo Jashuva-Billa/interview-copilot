@@ -83,6 +83,22 @@ BEHAVIORAL_HINTS = (
 )
 
 
+CANDIDATE_STATEMENT_PATTERNS = (
+    "thank you for",
+    "thanks for giving",
+    "giving this opportunity",
+    "let me introduce myself",
+    "my name is",
+    "i worked on",
+    "i have experience",
+    "i used",
+    "i implemented",
+    "i built",
+    "i am an",
+    "i am a",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class PipelineDecision:
     turn: ConversationTurn | None = None
@@ -92,58 +108,85 @@ class PipelineDecision:
     latency_ms: float = 0.0
 
 
+def _normalize_speaker_id(speaker_id: int | str | None) -> str:
+    if speaker_id is None:
+        return "UNKNOWN"
+    s = str(speaker_id).strip()
+    digits = re.sub(r"[^\d]", "", s)
+    if digits:
+        return str(int(digits))
+    return s.upper()
+
+
 class SpeakerRoleResolver:
-    def __init__(self, role_confidence_threshold: float = 0.58):
+    def __init__(self, role_confidence_threshold: float = 0.50):
         self.role_confidence_threshold = role_confidence_threshold
+        self.candidate_speaker_id: str | None = None
+
+    def calibrate_candidate(self, speaker_id: str | int | None) -> None:
+        if speaker_id is None:
+            return
+        norm_spk = _normalize_speaker_id(speaker_id)
+        if norm_spk == "UNKNOWN":
+            return
+
+        if self.candidate_speaker_id is not None:
+            if self.candidate_speaker_id != norm_spk:
+                print(
+                    f"[CALIBRATION] candidate_speaker_id already set to {self.candidate_speaker_id}; ignoring speaker={norm_spk}",
+                    flush=True,
+                )
+                log.info(
+                    "candidate_speaker_id already set to %s; ignoring speaker=%s",
+                    self.candidate_speaker_id,
+                    norm_spk,
+                )
+            return
+
+        self.candidate_speaker_id = norm_spk
+        print(f"[CALIBRATION] candidate_speaker_id = {self.candidate_speaker_id}", flush=True)
+        log.info("Calibrated candidate_speaker_id = %s", self.candidate_speaker_id)
+
+    def reset_calibration(self) -> None:
+        self.candidate_speaker_id = None
+        print("[CALIBRATION] candidate speaker reset", flush=True)
+        log.info("Candidate speaker calibration reset")
 
     def resolve(
         self,
         state: ConversationState,
-        speaker_id: str,
-        source: AudioSourceKind,
-        text: str,
-        question_hint: bool,
+        speaker_id: str | int,
+        source: AudioSourceKind = AudioSourceKind.UNKNOWN,
+        text: str = "",
+        question_hint: bool = False,
     ) -> tuple[SpeakerRole, float]:
-        speaker = state.speakers.setdefault(speaker_id, SpeakerState())
+        norm_spk = _normalize_speaker_id(speaker_id)
+        speaker = state.speakers.setdefault(norm_spk, SpeakerState())
         speaker.source_votes[source] = speaker.source_votes.get(source, 0) + 1
-        if question_hint:
-            speaker.question_votes += 1
-        elif len(text.split()) >= 4:
-            speaker.answer_votes += 1
 
-        source_role, source_conf = self._source_role(source)
-        behavior_role, behavior_conf = self._behavior_role(speaker)
+        # Direct microphone input can calibrate candidate speaker if not already set
+        if source == AudioSourceKind.MICROPHONE and norm_spk != "UNKNOWN" and self.candidate_speaker_id is None:
+            self.calibrate_candidate(norm_spk)
 
-        if source_role != SpeakerRole.UNKNOWN and source_conf >= behavior_conf:
-            role, confidence = source_role, source_conf
-        else:
-            role, confidence = behavior_role, behavior_conf
+        # 1. Once candidate is calibrated: candidate_speaker_id -> CANDIDATE, all other speakers -> INTERVIEWER
+        if self.candidate_speaker_id is not None:
+            if norm_spk == self.candidate_speaker_id:
+                speaker.role = SpeakerRole.CANDIDATE
+                speaker.confidence = 0.95
+                return SpeakerRole.CANDIDATE, 0.95
+            else:
+                speaker.role = SpeakerRole.INTERVIEWER
+                speaker.confidence = 0.90
+                return SpeakerRole.INTERVIEWER, 0.90
 
-        if confidence < self.role_confidence_threshold:
-            role = SpeakerRole.UNKNOWN
-        speaker.role = role
-        speaker.confidence = confidence
-        return role, confidence
-
-    def _source_role(self, source: AudioSourceKind) -> tuple[SpeakerRole, float]:
-        if source == AudioSourceKind.SYSTEM:
-            return SpeakerRole.INTERVIEWER, 0.82
-        if source == AudioSourceKind.MICROPHONE:
-            return SpeakerRole.CANDIDATE, 0.82
+        # 2. Before candidate calibration: UNKNOWN
+        speaker.role = SpeakerRole.UNKNOWN
+        speaker.confidence = 0.0
         return SpeakerRole.UNKNOWN, 0.0
-
-    def _behavior_role(self, speaker: SpeakerState) -> tuple[SpeakerRole, float]:
-        total = speaker.question_votes + speaker.answer_votes
-        if total < 2:
-            return SpeakerRole.UNKNOWN, 0.35
-        if speaker.question_votes > speaker.answer_votes:
-            return SpeakerRole.INTERVIEWER, min(0.92, 0.55 + speaker.question_votes / (total * 2))
-        if speaker.answer_votes > speaker.question_votes:
-            return SpeakerRole.CANDIDATE, min(0.90, 0.55 + speaker.answer_votes / (total * 2))
-        return SpeakerRole.UNKNOWN, 0.45
 
 
 class ConversationTurnDetector:
+
     def __init__(self, short_pause_seconds: float = 1.2, max_merge_seconds: float = 6.0):
         self.short_pause_seconds = short_pause_seconds
         self.max_merge_seconds = max_merge_seconds
@@ -177,16 +220,22 @@ class QuestionDetector:
         if not normalized:
             return QuestionDetectionResult(False, 0.0, "general", text)
 
+        # Reject candidate statement patterns
+        if any(pattern in normalized for pattern in CANDIDATE_STATEMENT_PATTERNS):
+            return QuestionDetectionResult(False, 0.05, "candidate_statement", text)
+
         score = 0.0
-        first = normalized.split()[0] if normalized.split() else ""
+        words = normalized.split()
+        first = words[0] if words else ""
+        
         if normalized.endswith("?"):
-            score += 0.45
+            score += 0.55
         if first in QUESTION_STARTERS:
-            score += 0.35
+            score += 0.40
         if any(pattern in normalized for pattern in IMPERATIVE_PATTERNS):
-            score += 0.48
-        if any(token in normalized for token in ("?", " could you ", " can you ", " would you ")):
-            score += 0.18
+            score += 0.50
+        if any(token in normalized for token in ("could you", "can you", "would you", "tell me", "walk me", "explain")):
+            score += 0.25
 
         confidence = min(0.98, score)
         is_question = confidence >= 0.45
@@ -196,6 +245,7 @@ class QuestionDetector:
             question_type=self._question_type(normalized),
             text=_clean_question_text(text),
         )
+
 
     def _question_type(self, normalized: str) -> str:
         if "code" in normalized or "complexity" in normalized or "algorithm" in normalized:
@@ -230,17 +280,23 @@ class QuestionAggregator:
             self._pending = turn
         self._updated_at = now
         complete = self._looks_complete(self._pending.text, detection)
-        return self._pending.text, complete
+        result_text = self._pending.text
+        if complete:
+            self._pending = None
+        return result_text, complete
+
 
     def _looks_complete(self, text: str, detection: QuestionDetectionResult) -> bool:
         stripped = text.strip()
         if stripped.endswith("?"):
             return True
-        if detection.is_question and len(stripped.split()) >= 4 and stripped.endswith((".", "!")):
+        if detection.is_question and len(stripped.split()) >= 3 and stripped.endswith((".", "!")):
             return True
-        if detection.is_question and monotonic() - self._updated_at >= self.completion_timeout_seconds:
+        if detection.is_question and (monotonic() - self._updated_at >= self.completion_timeout_seconds or self.completion_timeout_seconds <= 0):
             return True
         return False
+
+
 
 
 class QuestionDeduplicator:

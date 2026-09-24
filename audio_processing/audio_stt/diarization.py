@@ -42,16 +42,21 @@ class SourceMetadataDiarizationProvider:
         del audio, sample_rate
         if transcript is None:
             return ()
-        source = transcript.source.source if transcript.source else AudioSourceKind.UNKNOWN
-        if source == AudioSourceKind.SYSTEM:
-            speaker = "SPEAKER_SYSTEM"
-            confidence = 0.82
-        elif source == AudioSourceKind.MICROPHONE:
-            speaker = "SPEAKER_MICROPHONE"
-            confidence = 0.82
+        spk = getattr(transcript, "speaker_id", None)
+        if spk is not None:
+            speaker = str(spk)
+            confidence = getattr(transcript, "confidence", 0.85) or 0.85
         else:
-            speaker = "SPEAKER_00"
-            confidence = 0.35
+            source = transcript.source.source if transcript.source else AudioSourceKind.UNKNOWN
+            if source == AudioSourceKind.SYSTEM:
+                speaker = "SPEAKER_SYSTEM"
+                confidence = 0.82
+            elif source == AudioSourceKind.MICROPHONE:
+                speaker = "SPEAKER_MICROPHONE"
+                confidence = 0.82
+            else:
+                speaker = "SPEAKER_00"
+                confidence = 0.35
         return (
             SpeakerSegment(
                 speaker=speaker,
