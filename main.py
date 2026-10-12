@@ -11,6 +11,7 @@ from project_bootstrap import bootstrap
 bootstrap()
 
 import sys
+import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 
@@ -18,7 +19,7 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QApplication
 
 import config
-from audio_capture import AudioChunk, SpeechRecorder
+from audio_processing.audio_capture import AudioChunk, SpeechRecorder
 from openai_service import (
     check_ssl_connectivity,
     format_api_error,
@@ -47,7 +48,13 @@ class InterviewApp:
         self.window = OverlayWindow()
         self.bridge = WorkerBridge()
         self.executor = ThreadPoolExecutor(max_workers=config.MAX_WORKERS)
-        self.recorder: SpeechRecorder | None = None
+        # Independent audio workers keep candidate transcription responsive
+        # while a system-audio question is being answered.
+        self.audio_executor = ThreadPoolExecutor(max_workers=2)
+        self.recorder: SpeechRecorder | None = None  # legacy alias for system recorder
+        self.system_recorder: SpeechRecorder | None = None
+        self.mic_recorder: SpeechRecorder | None = None
+        self.candidate_transcripts: list[str] = []
         self.conversation: list[dict] = []
         self._busy = False
         self._force_next_coding = False
@@ -126,7 +133,9 @@ class InterviewApp:
             self.conversation.append(
                 {"role": "assistant", "content": response.full_text}
             )
-            self.bridge.answer.emit(response)
+            # The active overlay expects provider-tagged response dictionaries.
+            # Vision currently returns one parsed response from the OpenAI provider.
+            self.bridge.answer.emit({"provider": "openai", "response": response})
             if response.is_coding and response.code:
                 self.bridge.status.emit("Coding solution ready — Ctrl+Shift+S to rescan")
             else:
@@ -182,44 +191,107 @@ class InterviewApp:
     def _start_listening(self) -> None:
         if not config.openai_key_configured():
             self.window.status_changed.emit(
-                "OpenAI key missing in interview-copilot/.env (OPENAI_API_KEY=sk-...)"
+                "Configure an LLM API key in interview-copilot/.env before listening."
             )
             self.window.set_listening_state(False)
             return
 
-        def on_chunk(chunk: AudioChunk) -> None:
+        def on_system_chunk(chunk: AudioChunk) -> None:
             if self._busy:
-                self.bridge.status.emit("Still processing last question — hang on...")
+                self.bridge.status.emit("Question processing is busy; waiting for the next question...")
                 return
             self._busy = True
-            self.executor.submit(self._worker_process_audio, chunk)
+            self.audio_executor.submit(self._worker_process_audio, chunk)
 
-        def on_status(msg: str) -> None:
-            self.bridge.status.emit(msg)
+        def on_system_status(msg: str) -> None:
+            self.bridge.status.emit(f"System audio: {msg}")
 
-        self.recorder = SpeechRecorder(on_chunk=on_chunk, on_status=on_status)
+        def on_mic_chunk(chunk: AudioChunk) -> None:
+            # Candidate speech is transcribed for the spoken-answer log only.
+            # It must never enter question detection or trigger answer generation.
+            self.audio_executor.submit(self._worker_process_candidate_audio, chunk)
+
+        def on_mic_status(msg: str) -> None:
+            self.bridge.status.emit(f"Microphone: {msg}")
+
         try:
-            self.recorder.start()
+            self.system_recorder = SpeechRecorder(
+                on_chunk=on_system_chunk,
+                on_status=on_system_status,
+                source="system",
+            )
+            self.system_recorder.start()
+            self.recorder = self.system_recorder
+
+            self.mic_recorder = SpeechRecorder(
+                on_chunk=on_mic_chunk,
+                on_status=on_mic_status,
+                source="microphone",
+            )
+            self.mic_recorder.start()
         except Exception as e:
+            for recorder in (self.mic_recorder, self.system_recorder):
+                if recorder is not None:
+                    try:
+                        recorder.stop()
+                    except Exception:
+                        pass
+            self.recorder = None
+            self.system_recorder = None
+            self.mic_recorder = None
             self.bridge.error.emit(format_api_error(e))
             self.window.set_listening_state(False)
             return
-        label = getattr(self.recorder, "_device_label", "")
-        mode = "system audio" if self.recorder and self.recorder._loopback else "microphone"
+
+        system_label = getattr(self.system_recorder, "_device_label", "system input")
+        mic_label = getattr(self.mic_recorder, "_device_label", "default microphone")
         self.window.status_changed.emit(
-            f"Listening ({mode}) — {label[:50]} — click Stop when done"
+            f"Listening | Interviewer: {system_label[:36]} | Your mic: {mic_label[:36]}"
         )
 
     def _stop_listening(self) -> None:
-        if self.recorder:
-            self.recorder.stop()
-            self.recorder = None
-        self.window.status_changed.emit("Stopped listening")
+        for recorder in (self.mic_recorder, self.system_recorder):
+            if recorder is not None:
+                try:
+                    recorder.stop()
+                except Exception:
+                    traceback.print_exc()
+        self.recorder = None
+        self.system_recorder = None
+        self.mic_recorder = None
+        self.window.status_changed.emit("Stopped listening (system audio + microphone)")
+
+    def _worker_process_candidate_audio(self, chunk: AudioChunk) -> None:
+        try:
+            text = transcribe(chunk.samples, chunk.sample_rate)
+            if not text:
+                return
+            self.candidate_transcripts.append(text)
+            # Keep the candidate's spoken answer separate from interviewer Q&A.
+            self.bridge.status.emit(f"Your mic heard: {text[:180]}")
+        except Exception as e:
+            self.bridge.status.emit(f"Microphone transcription failed: {format_api_error(e)}")
+            traceback.print_exc()
 
     def _worker_process_audio(self, chunk: AudioChunk) -> None:
         try:
+            worker_started = time.perf_counter()
+            if chunk.speech_end_at and chunk.emitted_at:
+                print(
+                    f"[latency] vad_end_delay_ms={(chunk.emitted_at - chunk.speech_end_at) * 1000:.0f}",
+                    flush=True,
+                )
+                print(
+                    f"[latency] audio-finalized-to-worker_ms={(worker_started - chunk.emitted_at) * 1000:.0f}",
+                    flush=True,
+                )
             self.bridge.status.emit("Transcribing interviewer audio...")
+            transcription_started = time.perf_counter()
             text = transcribe(chunk.samples, chunk.sample_rate)
+            print(
+                f"[latency] transcription_ms={(time.perf_counter() - transcription_started) * 1000:.0f}",
+                flush=True,
+            )
             if not text:
                 self.bridge.status.emit(
                     "Could not hear speech — turn up Meet volume / use speakers"
@@ -238,6 +310,27 @@ class InterviewApp:
             self._busy = False
 
     def _generate_for_question(self, text: str, force_coding: bool) -> None:
+        generation_started = time.perf_counter()
+        first_token_at = None
+        active_providers = config.get_active_providers()
+        display_provider = "openai" if "openai" in active_providers else (
+            active_providers[0] if active_providers else "openai"
+        )
+
+        def on_llm_chunk(provider, parsed) -> None:
+            nonlocal first_token_at
+            # Stream the primary provider immediately; don't let a slower
+            # secondary provider overwrite the answer being shown.
+            if provider != display_provider:
+                return
+            if first_token_at is None:
+                first_token_at = time.perf_counter()
+                print(
+                    f"[latency] llm_first_token_ms={(first_token_at - generation_started) * 1000:.0f}",
+                    flush=True,
+                )
+            self.bridge.answer.emit({"provider": provider, "response": parsed})
+
         try:
             self.bridge.question.emit(text)
             from openai_service import should_use_coding_mode
@@ -247,12 +340,42 @@ class InterviewApp:
             self.bridge.status.emit(
                 f"Generating {'coding solution' if coding else 'answer'}..."
             )
-            response = generate_answer(text, self.conversation, force_coding)
-            self.conversation.append({"role": "user", "content": text})
-            self.conversation.append(
-                {"role": "assistant", "content": response.full_text}
+            responses = generate_answer(
+                text,
+                self.conversation,
+                force_coding,
+                on_chunk=on_llm_chunk,
             )
-            self.bridge.answer.emit(response)
+            if isinstance(responses, dict):
+                # The multi-provider service returns {provider: ParsedResponse};
+                # the overlay consumes {"provider": ..., "response": ...} events.
+                if not responses:
+                    raise RuntimeError("No answer received from the configured LLM providers.")
+                primary_provider = "openai" if "openai" in responses else next(iter(responses))
+                primary_response = responses[primary_provider]
+                # Final event replaces the streamed partial with the complete answer.
+                self.bridge.answer.emit({
+                    "provider": primary_provider,
+                    "response": primary_response,
+                })
+            else:
+                # Backward compatibility with the original single-provider service.
+                primary_provider = "openai"
+                primary_response = responses
+                self.bridge.answer.emit({
+                    "provider": primary_provider,
+                    "response": primary_response,
+                })
+
+            answer_text = getattr(primary_response, "full_text", "") or getattr(primary_response, "approach", "")
+            if not answer_text.strip():
+                raise RuntimeError("The LLM provider returned an empty answer.")
+            print(
+                f"[latency] llm_total_ms={(time.perf_counter() - generation_started) * 1000:.0f}",
+                flush=True,
+            )
+            self.conversation.append({"role": "user", "content": text})
+            self.conversation.append({"role": "assistant", "content": answer_text})
             self.bridge.status.emit("Ready — listening...")
         except Exception as e:
             self.bridge.error.emit(format_api_error(e))

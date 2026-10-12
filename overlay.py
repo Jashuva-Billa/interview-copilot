@@ -240,7 +240,7 @@ class OverlayWindow(QMainWindow):
         self.status_label.setObjectName("status")
         layout.addWidget(self.status_label)
 
-        layout.addWidget(QLabel("Question / problem", objectName="section"))
+        layout.addWidget(QLabel("Question", objectName="section"))
         self.question_box = QTextEdit()
         self.question_box.setReadOnly(True)
         self.question_box.setMaximumHeight(72)

@@ -1,0 +1,19 @@
+{
+  "name": "Jashuva",
+  "skills": [
+    "Python",
+    "Generative AI",
+    "LangGraph",
+    "Milvus",
+    "Redis",
+    "AWS Bedrock",
+    "MCP Servers"
+  ],
+  "experience": [
+    {
+      "role": "AI Engineer",
+      "project": "Agentic AI Platform Migration",
+      "summary": "Modernized Enterprise RAG platform to Agentic AI utilizing LangGraph and Milvus vector db."
+    }
+  ]
+}

@@ -1,6 +1,23 @@
+# Environment and local secrets
 .env
+**/.env
+wboxai_app/.session.json
+
+# Python environments and caches
 venv/
-__pycache__/
-*.pyc
+.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local audio and generated build artifacts
 *.wav
+build/
+dist/
+
+# Local interview transcripts, latency reports, and token reports
+reports/
+
+# OS/editor artifacts
 .DS_Store
+Thumbs.db

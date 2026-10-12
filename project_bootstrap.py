@@ -2,7 +2,7 @@
 Ensure Interview Copilot runs only inside its own folder.
 - Working directory: interview-copilot/
 - Config: interview-copilot/.env only (not Outreach or OS env)
-- Python: interview-copilot/venv only
+- Python: use the interpreter that launches the app (no forced local venv)
 """
 
 from __future__ import annotations
@@ -66,5 +66,4 @@ def bootstrap() -> Path:
     """Call once at startup before other project imports use config."""
     ensure_project_root()
     assert_env_file()
-    assert_local_venv()
     return ROOT

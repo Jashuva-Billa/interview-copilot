@@ -1,0 +1,282 @@
+## Project Context
+
+I have worked on two enterprise Generative AI projects that evolved from a Retrieval-Augmented Generation (RAG) system into a full Agentic AI platform. Always explain the projects from an engineering and architectural perspective rather than focusing on the business domain.
+
+----------------------------------------
+PROJECT 1: Enterprise RAG Platform
+----------------------------------------
+
+Story:
+We initially built a Proof of Concept to validate whether semantic retrieval could outperform traditional keyword search over large unstructured documents. The POC proved the concept but exposed several production challenges including retrieval quality, hallucinations, latency, scalability, evaluation, and observability.
+
+Based on these learnings, we designed and implemented an enterprise-grade RAG platform capable of reliable, grounded, and scalable retrieval.
+
+Architecture:
+
+User
+→ FastAPI
+→ Query Validation
+→ Query Optimization
+→ Embedding Generation
+→ Hybrid Retrieval (Semantic + BM25 + Graph Retrieval)
+→ Milvus Vector Database
+→ Cross-Encoder Re-ranking
+→ Prompt Construction
+→ Amazon Bedrock LLM
+→ Guardrails
+→ Response
+→ Evaluation & Observability
+
+Document Pipeline:
+
+Multiple Data Sources
+→ Firecrawl
+→ Confluence API
+→ Apache Tika
+→ Docling
+→ AWS Textract
+→ SharePoint Connector
+→ Metadata Extraction
+→ Chunking
+→ Embeddings
+→ Milvus
+
+Tech Stack:
+
+Backend:
+- Python
+- FastAPI
+- LangChain
+
+Data Ingestion:
+- Firecrawl
+- Confluence API
+- Apache Tika
+- Docling
+- AWS Textract
+- SharePoint Connector
+- Selenium
+- Playwright
+
+Storage:
+- Amazon S3
+- PostgreSQL
+- Redis
+
+Embeddings:
+- Sentence Transformers
+- all-MiniLM-L6-v2
+- e5-base-v2
+
+Vector Database:
+- Milvus
+
+Retrieval:
+- Hybrid Search
+- Semantic Search
+- BM25
+- Graph Retrieval
+- Cross Encoder Re-ranking
+
+LLM:
+- Amazon Bedrock
+
+Guardrails:
+- PII Detection
+- Prompt Validation
+- Confidence Threshold
+- Compliance Validation
+
+Observability:
+- Langfuse
+- CloudWatch
+- Prometheus
+- Grafana
+- OpenTelemetry
+
+Evaluation:
+- DeepEval
+- RAGAS
+- Precision@K
+- Recall@K
+- BERTScore
+- Hallucination Metrics
+
+Deployment:
+- Docker
+- Kubernetes (AWS EKS)
+- CI/CD
+
+Key Engineering Focus:
+- Enterprise RAG
+- Hybrid Retrieval
+- Grounded Generation
+- Evaluation
+- Observability
+- Production Scalability
+
+----------------------------------------
+PROJECT 2: Enterprise Agentic AI Platform
+----------------------------------------
+
+Story:
+
+Once the RAG platform matured, we realized retrieval alone could answer questions but could not execute workflows. We evolved the architecture into a Hybrid Agentic AI Platform capable of reasoning, planning, orchestrating multiple specialized agents, invoking enterprise tools, maintaining memory, validating policies, and completing end-to-end tasks.
+
+Rather than replacing RAG, RAG became one subsystem inside the larger Agentic AI architecture.
+
+Architecture:
+
+User
+→ React UI
+→ FastAPI
+→ LangGraph Orchestrator
+
+↓
+
+Triage Agent
+
+↓
+
+Specialized Domain Agents
+
+- Knowledge Agent
+- Service Agent
+- Billing Agent
+- Order Agent
+- Escalation Agent
+- Policy Agent
+
+↓
+
+Context Engineering
+
+- RAG
+- Session Memory
+- Persistent Memory
+- Knowledge Graph
+- Redis
+
+↓
+
+MCP Tool Servers
+
+↓
+
+Enterprise APIs
+
+↓
+
+Policy Validation
+
+↓
+
+Human Approval (if required)
+
+↓
+
+Execute Action
+
+↓
+
+Response
+
+↓
+
+Evaluation & Observability
+
+Tech Stack:
+
+Orchestration:
+- LangGraph
+- LangChain
+- FastAPI
+- MCP (Model Context Protocol)
+
+Models:
+- Amazon Bedrock
+- Bedrock Guardrails
+
+Retrieval:
+- Milvus
+- Hybrid Search
+- BM25
+- Knowledge Graph
+- Cross Encoder Re-ranking
+
+Memory:
+- Redis
+- PostgreSQL
+- Session Memory
+- Persistent Memory
+
+Tool Integration:
+- MCP Servers
+- REST APIs
+- API Gateway
+- CRM APIs
+- Scheduling APIs
+- Billing APIs
+- Diagnostics APIs
+
+Validation:
+- Pydantic
+- JSON Schema
+- Guardrails AI
+- Policy Engine
+
+Security:
+- IAM
+- OPA
+- Presidio
+- Bedrock Guardrails
+
+Infrastructure:
+- AWS EKS
+- Docker
+- Lambda
+- Step Functions
+- DynamoDB
+- Redis
+- PostgreSQL
+
+Observability:
+- Langfuse
+- CloudWatch
+- Prometheus
+- Grafana
+- OpenTelemetry
+- Sentry
+
+Evaluation:
+- DeepEval
+- RAGAS
+- Tool Correctness
+- Workflow Completion
+- ROUGE
+- BERTScore
+- Safety Metrics
+
+Key Engineering Focus:
+- Multi-Agent Systems
+- LangGraph Orchestration
+- Context Engineering
+- Memory Management
+- MCP Tool Calling
+- Policy Validation
+- Human-in-the-Loop
+- Enterprise Workflow Automation
+
+----------------------------------------
+OVERALL PROJECT EVOLUTION
+----------------------------------------
+
+The two projects should always be presented as one continuous engineering journey:
+
+Phase 1:
+Built an enterprise-grade RAG platform to solve knowledge retrieval using hybrid search, vector databases, reranking, evaluation, and guardrails.
+
+Phase 2:
+Extended the RAG platform into a Hybrid Agentic AI system where RAG became one subsystem. Added LangGraph orchestration, specialized agents, memory, MCP-based tool execution, policy validation, and workflow automation.
+
+Always explain the projects from an architecture-first perspective rather than emphasizing the business domain. Focus on engineering decisions, trade-offs, scalability, observability, evaluation, and production readiness.

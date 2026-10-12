@@ -1,0 +1,214 @@
+Hi, I am Suchita.
+
+
+I started my career as a software engineer. Later I moved into machine learning. I started with MLOps. Now I work more on Generative AI and Agent based AI.
+
+Recently, I worked on an end to end customer care AI assistant platform. First, I did a proof of concept of RAG customer assistant.
+
+After that, I worked on Phase one. Phase one is live in production now.
+
+Phase one is a RAG system.
+
+· It has two main parts. Ingestion pipeline and Query pipeline.
+
+· We worked with unstructured data.
+
+· I did data cleaning and preprocessing using Docling.
+
+· For chunking and embeddings, I used Docling and sentence transformers.
+
+· I used LangChain for orchestration, prompt-templating, chaining, q-and-a
+
+· I implemented a hybrid retriever. Semantic + keyword
+
+· I used Milvus as the vector database.
+
+· For generation, I used AWS Bedrock with Claude Sonnet.
+
+· I also worked on retriever evaluation and generation evaluation.
+
+· The full stack includes React for frontend, FastAPI for backend, and AWS EKS for deployment.
+
+· I also implemented guardrails.
+
+· I handled conversation history, reranking, and query optimization.
+
+After that, we worked on Phase two, not production yet, only some parts.
+
+· Phase two is a multi agent system built using LangGraph.
+
+· It includes memory management for short term and long term memory.
+
+· There is an orchestrator agent using the supervisor pattern.
+
+· There is a router for intent detection.
+
+· There are domain agents such as DOMAIN AGENTS LIST HERE.
+
+· Tool calling is done using MCP.
+
+
+In the past, I also worked on full stack development and MLOps.
+
+· I used MLflow and Databricks.
+
+· I deployed and served models.
+
+· I am also familiar with SageMaker.
+
+
+· I did a small fine tuning task with data scientists.
+
+· It was for intent classification using a RoBERTa model.
+
+
+· I also worked on CI CD using Github.
+
+· I used Docker, Kubernetes, ArgoCD, Helm, and Terraform.
+
+· I worked on AWS environments including EKS, ECS, S3, and Lambda.
+
+· For monitoring and Observability, I used Datadog, CloudWatch, Prometheus, and Grafana.
+
+
+I was laid off one month ago.
+
+
+RAG Project explanation:
+
+Business problem and why this solution was built
+
+• Call center agents were handling many healthcare calls and had to search large policy PDFs, scanned documents, and internal wiki pages during live calls.
+
+• The existing keyword search system could not understand meaning, so agents spent a lot of time searching and still gave different answers.
+
+• The business goal was to reduce call time, improve answer accuracy, make answers consistent across agents, and stay compliant with healthcare rules.
+
+• A proof of concept using OpenAI embeddings, ChromaDB, and a simple Streamlit UI showed strong value to agents, which led leadership to approve a full production system.
+
+Design, architecture, and end to end flow with technologies
+
+
+• Data ingestion: Policy PDFs, scanned files, HTML pages, and wikis are ingested using Apache Tika, Docling, AWS Textract, Firecrawl, and Confluence APIs, with documents stored in Amazon S3.
+
+• Preprocessing: Text is cleaned, metadata like document version and date is added, and PII is removed using Microsoft Presidio. Content is split into meaningful chunks using Docling and spaCy.
+
+• Embeddings: Each chunk is converted into vectors using Sentence Transformer models like e5 base v2, and stored in Milvus vector database with tenant level isolation.
+
+• Query handling: When an agent asks a question, the system cleans the query, masks sensitive data, detects language and intent, and creates a query embedding using the same embedding model.
+
+• Retrieval: The system uses semantic search in Milvus, keyword search with BM25, and graph based retrieval using Neo4j, and then combines results using rank fusion.
+
+• Reranking and safety: Results are reranked using a cross encoder model, low confidence content is filtered out, and fallback logic is applied if reliable information is not found.
+
+• Generation: Only trusted content is sent to LLMs like Claude Sonnet or Claude Haiku through AWS Bedrock using strict prompts, and answers are generated with citations.
+
+• Platform and operations: The system runs on FastAPI, LangChain, Kubernetes on Amazon EKS, with Redis caching, CloudWatch, Prometheus, Grafana, and Langfuse for monitoring and tracing to ensure fast and reliable responses during live calls.
+
+
+Multi Agent (Agentic AI) Project explanation:
+
+• After RAG solved policy lookup, agents still had to manually do actions in many systems, which kept call time high and caused errors.
+
+Design, architecture, and end to end flow with technologies
+
+• The goal of Phase Two was to move from read only answers to AI that can plan and take actions with human approval.
+
+• We moved from a linear RAG pipeline to an agent based system with loops, so the AI can plan, act, check results, and retry if needed.
+
+
+Overall architecture
+
+• A hierarchical multi agent system with one main Orchestrator agent and many domain specific agents.
+
+• A shared state graph controls flow, retries, approvals, and stopping points.
+
+• Phase One RAG is reused inside agents for policy grounding.
+
+Main flow
+
+• User asks a question or request in chat.
+
+• Orchestrator agent is the front door.
+
+• Uses intent classification, identity lookup, and session memory.
+
+• Built using ReAct style reasoning with tool access and memory.
+
+• Writes a clear plan into a shared scratchpad stored in Postgres.
+
+• Orchestrator routes the task to a domain agent, such as Claims, Billing, Scheduling, or Policy.
+
+Domain agents
+
+• Claims Agent
+
+• Uses ReAct plus RAG for explanations and tool calls for actions.
+
+• Tools include Claims Management System, ICD and CPT lookup, dispute generation services, and historical claims vector index.
+
+• Billing and Accounts Agent
+
+• Uses fixed automation for payments and tool enhanced logic for reconciliation.
+
+• Tools include Billing Ledger System, Payment Gateway, and financial rules engine.
+
+• High risk actions always require human approval.
+
+• Appointment and Scheduling Agent
+
+• Uses cyclic planning to handle slot taken errors.
+
+• Tools include EHR scheduling APIs, provider directory, and availability calendars.
+
+
+• Policy and Benefits Agent
+
+• Uses RAG with policy documents and a benefits knowledge graph.
+
+Backend safety agents
+
+• Compliance Sentinel Agent
+
+• Scans all actions and responses for PII and unsafe behavior.
+
+• Acts as a final stop or go gate before execution.
+
+• Anti Fraud Agent
+
+• Uses statistical and predictive models to detect suspicious activity.
+
+Communication and memory
+
+• Shared Blackboard pattern is used instead of agents talking directly.
+
+• All agents read and write to shared state stored in Postgres.
+
+• Model Context Protocol is used as a standard way for agents to call APIs and databases.
+
+• Three memory layers are used.
+
+• Short term working memory in the state graph.
+
+• Conversation summaries handled by a summarization agent.
+
+• Long term memory stored in a vector database from RAG.
+
+Safety and control
+
+• Input sandboxing blocks prompt injection.
+
+• Identity tokens are passed to every API call so agents cannot access unauthorized data.
+
+• Tiered autonomy forces human approval for high risk actions.
+
+• Every step is logged with audit trails and reasoning logs.
+
+
+Evaluation and testing
+
+• Success is measured by task completion rate, tool call accuracy, and zero unauthorized actions.
+
+• Mock systems are used to safely test failures and retries.
+
+• Red teaming is used to test security and safety limits.

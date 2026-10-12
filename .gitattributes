@@ -1,0 +1,23 @@
+# Set default behavior to force all text files to use LF on checkout, and normalized on commit
+* text eol=lf
+
+# Ensure Windows-specific scripts use CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Ensure shell scripts always use LF
+*.sh text eol=lf
+
+# Explicitly declare binary files to prevent normalization
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary

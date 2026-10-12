@@ -90,29 +90,21 @@ Heavy work (screenshots, OpenAI) runs in a **background thread**. The UI thread 
 
 ## Audio setup (Google Meet / Zoom / Teams)
 
-**You must click Start listening** — the app does not answer until listening is on.
+The runtime uses two independent, simple audio recorders:
 
-| Mode | `.env` | Use when |
-|------|--------|----------|
-| Loopback | `AUDIO_SOURCE=loopback` | **Default on Windows** — captures interviewer from **speakers** (PC Speaker device) |
-| Microphone | `AUDIO_SOURCE=microphone` | Mac without BlackHole, or if loopback fails |
+- **System audio = interviewer.** Only this stream is transcribed as a question and sent to the LLM.
+- **Microphone = candidate.** This stream is transcribed as your spoken answer and never triggers LLM generation.
+- If system-audio capture is unavailable, the app reports an error instead of silently switching the interviewer stream to the microphone.
 
-**For Meet interviews on Windows:**
+Set AUDIO_SOURCE=loopback in the repository-root .env (the value is retained for compatibility; the runtime explicitly opens both sources). On Windows, the system-audio device must be available as a PC Speaker/loopback input or Stereo Mix. The microphone uses the Windows default input device.
 
-1. Use **speakers** (or earbuds as speaker output) so system audio is captured — not headphones-only with no loopback.
-2. Keep Meet volume up; status should show `Listening — system audio (PC Speaker ...)`.
-3. Wait until the interviewer **finishes** a sentence (~1s pause) — then you should see `Transcribing...` → `Generating answer...`.
+Click **Start listening**. The status line should identify both **Interviewer** and **Your mic**. When the interviewer finishes a question, the app transcribes it and shows the generated answer. Your speech appears separately as **Your mic heard: ...**.
 
-If loopback is not detected:
+If startup reports that system audio is unavailable, open **Sound settings → More sound settings → Recording** and enable Stereo Mix if your hardware provides it, or make a loopback capture input available. A working microphone alone is not enough to capture the interviewer stream.
 
-1. Open **Sound settings → More sound settings → Recording** → enable **Stereo Mix** if available, or
-2. Set `AUDIO_SOURCE=microphone` in `.env` and let the mic hear your speakers (quiet room)
+## Latency diagnostics
 
-List devices:
-
-```powershell
-python -c "import sounddevice as sd; print(sd.query_devices())"
-```
+The console prints [latency] timings for VAD end detection, audio-worker queueing, transcription, first LLM token, and total generation time. The answer panel updates as the primary LLM streams tokens instead of waiting for the complete response. The system-audio VAD uses a 500 ms end-silence window (microphone uses 650 ms); increase it if questions are being split during longer pauses.
 
 ## Screen sharing behavior
 
@@ -185,7 +177,7 @@ Edit `.env`:
 - `OPENAI_VISION_MODEL` — `gpt-4o` for screen reading (required for Scan/Watch)
 - `SCREEN_WATCH_INTERVAL_SEC` — auto-scan interval when Watch is on
 - `OPENAI_CHAT_MODEL` — e.g. `gpt-4o` for stronger coding answers
-- `OPENAI_TRANSCRIBE_MODEL` — default `whisper-1`
+- `OPENAI_TRANSCRIBE_MODEL` — default `gpt-4o-mini-transcribe` for lower-latency speech recognition
 
 ## Privacy & ethics
 

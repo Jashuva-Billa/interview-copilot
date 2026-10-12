@@ -1,0 +1,8 @@
+-r requirements.txt
+
+# Local VAD and STT. Install explicitly because these packages and model
+# downloads are large and are not required by the OpenAI fallback.
+onnxruntime>=1.18.0
+silero-vad>=6.0.0
+funasr>=1.2.0
+torch>=2.2.0
