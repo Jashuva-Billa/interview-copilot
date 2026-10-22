@@ -146,6 +146,7 @@ class OverlayWindow(QMainWindow):
         self._listening = False
         self._coding_visible = False
         self._last_question = ""
+        self._last_responses: dict[str, dict] = {}
         self._transparent = config.use_transparent_overlay()
         self._share_hide_ok = False
         self._applying_exclude = False
@@ -566,7 +567,15 @@ class OverlayWindow(QMainWindow):
         self.question_box.setMaximumHeight(72)
         self.code_box.setMaximumHeight(self._code_box_max_default)
 
-    def _set_response(self, response: ParsedResponse) -> None:
+    def _set_response(self, data: ParsedResponse | dict) -> None:
+        if isinstance(data, dict):
+            provider = str(data.get("provider") or "openai")
+            response = data.get("response")
+            if not isinstance(response, ParsedResponse):
+                return
+            self._last_responses[provider] = {"response": response}
+        else:
+            response = data
         if response.is_coding or response.code:
             self.code_section.show()
             self.approach_label.setText("What to say (approach)")
