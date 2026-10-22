@@ -60,6 +60,13 @@ For lower-latency live text, set `DEEPGRAM_API_KEY` in the project `.env` and in
 
 `AUDIO_STT_MODE=snapshot` forces the OpenAI snapshot fallback. `AUDIO_PARTIAL_INTERVAL_MS`, `AUDIO_FRAME_MS`, `AUDIO_END_SILENCE_MS`, and `AUDIO_LONG_UTTERANCE_SILENCE_MS` tune capture and fallback behavior. End-to-end speech transcription cannot be nanosecond-latency: the default capture frame alone represents 20 ms of audio, and recognition, network transit, and UI scheduling add more. A live microphone/loopback measurement is required to characterize actual latency on the target machine.
 
+
+## Model API path (not ChatGPT web)
+
+The desktop app does not automate the ChatGPT website. The active Windows runner uses `app/run_app.py` and import-path precedence that resolves the Windows configuration/UI from `wboxai_app/`, the multi-provider generation service from `llm_project/openai_service.py`, and audio capture/STT from `audio_processing/`. The direct app/macOS path uses the migrated modules under `app/core/`, `app/services/`, and `app/ui/`; these implementations are not yet fully consolidated.
+
+For OpenAI, the service creates an official Python `OpenAI` client from `OPENAI_API_KEY` and calls API endpoints for text generation, audio transcription, and screenshot/vision analysis. The Windows multi-provider service can additionally call Gemini's API and Anthropic's API when their keys are configured, or use a local Ollama endpoint when `USE_LOCAL_LLM=true`. For streaming interviewer transcription, the app can send PCM audio to Deepgram over a persistent WebSocket when `DEEPGRAM_API_KEY` and the active STT mode permit it; otherwise it uses the OpenAI snapshot-transcription path. These are provider API calls, not requests sent through a logged-in ChatGPT web session.
+
 ## Responsibility boundaries
 
 - Entry point: bootstrap once, construct the application, start the event loop. It should not implement audio or LLM behavior.
