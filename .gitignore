@@ -10,8 +10,27 @@ venv/
 *.py[cod]
 .pytest_cache/
 
-# Local audio and generated build artifacts
+# Local audio recordings and generated audio fixtures (never commit audio binaries)
 *.wav
+*.wave
+*.mp3
+*.m4a
+*.aac
+*.flac
+*.ogg
+*.opus
+*.webm
+*.mp4
+*.wma
+*.aiff
+*.aif
+*.pcm
+*.raw
+# Local recordings and generated corpus audio
+tests/audio_corpus/**/*.wav
+tests/audio_stress_corpus/**/*.wav
+audio_recordings/
+recordings/
 build/
 dist/
 
@@ -21,3 +40,12 @@ reports/
 # OS/editor artifacts
 .DS_Store
 Thumbs.db
+
+# Test and lint artifacts
+.coverage
+coverage.xml
+htmlcov/
+.ruff_cache/
+
+# Local personal resume/context data
+local_data/resume_context.txt

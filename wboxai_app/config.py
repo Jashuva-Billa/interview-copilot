@@ -22,7 +22,6 @@ ENV_FILE = (ROOT / ".env") if FROZEN else (ROOT.parent / ".env")
 if not ENV_FILE.is_file() and not FROZEN and (ROOT / ".env").is_file():
     ENV_FILE = ROOT / ".env"
 
-
 # Single source of truth — this file only
 _FILE_ENV: dict[str, str | None] = (
     dotenv_values(ENV_FILE) if ENV_FILE.is_file() else {}
@@ -52,6 +51,12 @@ OPENAI_TRANSCRIBE_MODEL = _env("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcrib
 OPENAI_CHAT_MODEL = _env("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 CODING_MAX_TOKENS = max(600, int(_env("CODING_MAX_TOKENS", "1400")))
 AUDIO_SOURCE = _env("AUDIO_SOURCE", "loopback").lower()
+# Use the streaming recognizer when configured; otherwise retain OpenAI snapshots.
+AUDIO_STT_MODE = _env("AUDIO_STT_MODE", "auto").lower()
+DEEPGRAM_API_KEY = _env(
+    "DEEPGRAM_API_KEY",
+    _env("AUDIO_PROCESSING_DEEPGRAM_KEY", _env("SPEECH_TO_TEXT_DEEPGRAM_KEY", _env("DHWANI_DEEPGRAM_KEY", ""))),
+)
 ENTERPRISE_AUDIO = _env_bool("ENTERPRISE_AUDIO", "true")
 AUDIO_STT_PROVIDER = _env("AUDIO_STT_PROVIDER", "sensevoice").lower()
 AUDIO_STT_MODEL = _env("AUDIO_STT_MODEL", "iic/SenseVoiceSmall")
@@ -91,7 +96,9 @@ SCREEN_WATCH_ENABLED = _env_bool("SCREEN_WATCH_ENABLED", "false")
 EXCLUDE_REFRESH_SEC = int(_env("EXCLUDE_REFRESH_SEC", "8"))
 MAX_WORKERS = int(_env("MAX_WORKERS", "1" if LIGHTWEIGHT_MODE else "2"))
 
-INVISIBLE_IN_SHARE = _env_bool("INVISIBLE_IN_SHARE", "true")
+# Default to visible in screen-sharing captures on every launch. The UI toggle
+# can still enable capture exclusion for the current session.
+INVISIBLE_IN_SHARE = False
 OVERLAY_TRANSPARENT = _env_bool("OVERLAY_TRANSPARENT", "true")
 # Do not steal focus from HackerRank/CoderPad (hover+scroll, WS_EX_NOACTIVATE on Windows)
 STEALTH_FOCUS = _env_bool("STEALTH_FOCUS", "true")
@@ -134,7 +141,6 @@ SELECTED_CANDIDATE_NAME = "UnknownCandidate"
 SESSION_TIMESTAMP = ""
 
 
-
 def use_transparent_overlay() -> bool:
     return OVERLAY_TRANSPARENT
 
@@ -170,13 +176,19 @@ def resume_path() -> Path:
     env_p = _env("RESUME_CONTEXT_PATH", "")
     if env_p:
         p = Path(env_p)
+        if not p.is_absolute():
+            p = (ROOT if FROZEN else ROOT.parent) / p
         if p.is_file():
             return p
-    if (ROOT / "resume_context.txt").is_file():
-        return ROOT / "resume_context.txt"
-    if (ROOT.parent / "resume_context.txt").is_file():
-        return ROOT.parent / "resume_context.txt"
-    return ROOT / "resume_context.txt"
+    project_root = ROOT if FROZEN else ROOT.parent
+    local_resume = project_root / "local_data" / "resume_context.txt"
+    if local_resume.is_file():
+        return local_resume
+    # Backward compatibility for existing installs that have not moved their resume yet.
+    legacy_resume = project_root / "resume_context.txt"
+    if legacy_resume.is_file():
+        return legacy_resume
+    return local_resume
 
 
 RESUME_PATH = resume_path()
@@ -209,8 +221,7 @@ def load_intro_context() -> str:
 
 
 def project_overview_path() -> Path:
-    p = ROOT / "project_overview.txt"
-    return p
+    return ROOT / "project_overview.txt"
 
 
 PROJECT_OVERVIEW_PATH = project_overview_path()

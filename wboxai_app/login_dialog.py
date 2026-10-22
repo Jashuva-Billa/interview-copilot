@@ -14,16 +14,14 @@ import threading
 import webbrowser
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread
-from PyQt6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPalette
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
+from PyQt6.QtGui import QColor, QIcon
 from PyQt6.QtWidgets import (
-    QApplication,
     QDialog,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -120,7 +118,6 @@ def _start_auth_server(port: int, bridge: _SignalBridge, auth_request, auth_sett
     Returns (server_list, actual_port).
     """
     import socket
-    import urllib.parse
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
     class _Handler(BaseHTTPRequestHandler):
@@ -146,7 +143,6 @@ def _start_auth_server(port: int, bridge: _SignalBridge, auth_request, auth_sett
                 error_html,
                 success_html,
             )
-            parsed = urllib.parse.urlparse(self.path)
             body = b""
             if self.command == "POST":
                 try:
@@ -676,7 +672,8 @@ class LoginDialog(QDialog):
                         env_file.write_text("".join(new_lines), encoding="utf-8")
                         print(f"[login] .env updated with WBL sync data: {list(updated.keys())}", flush=True)
                     if resume_text:
-                        resume_path = root / "resume_context.txt"
+                        resume_path = root / "local_data" / "resume_context.txt"
+                        resume_path.parent.mkdir(parents=True, exist_ok=True)
                         resume_path.write_text(resume_text, encoding="utf-8")
                         print(f"[login] Resume synced to {resume_path}", flush=True)
             except Exception as sync_err:

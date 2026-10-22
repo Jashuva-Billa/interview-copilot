@@ -1,0 +1,1 @@
+"""Interview Copilot application package."""

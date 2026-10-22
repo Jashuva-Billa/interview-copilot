@@ -2,10 +2,9 @@ import base64
 import io
 import re
 import wave
-import queue
 import threading
 from functools import lru_cache
-from typing import Optional, Tuple, Callable
+from typing import Tuple, Callable
 
 import certifi
 import httpx
@@ -14,7 +13,6 @@ from openai import APIConnectionError, OpenAI
 
 import config
 from llm_project.coding_detector import is_coding_question
-from llm_project.interview_prompt import build_interview_user_prompt
 from llm_project.response_parser import (
     ParsedResponse,
     parse_structured_response,
@@ -51,6 +49,8 @@ def _init_ssl() -> None:
             truststore.inject_into_ssl()
         except ImportError:
             pass
+
+
 
 SYSTEM_PROMPT = """###############################
 ## SYSTEM IDENTITY
@@ -352,6 +352,19 @@ Inserted Documents (PDFs):
 
 Target role: {role}
 {job_desc}
+
+
+###############################
+## LIVE INTERVIEW SPOKEN ANSWER OVERRIDE
+###############################
+
+For ordinary spoken interview questions, these rules take precedence over the generic response-format guidance above:
+- Output ONLY the exact answer the candidate should say aloud, in 1–2 crisp, natural sentences.
+- No headings, bullets, preamble, summaries, complexity sections, edge cases, code fences, or code unless the interviewer explicitly asks for code.
+- For experience/project questions, use first person and only details supported by the candidate context.
+- For technical questions, state the direct answer and the most relevant technology or trade-off.
+- If the transcript is incomplete or clearly cut off, do not answer the fragment; wait for the complete question.
+- Coding/assessment mode should activate only for an actual coding task that asks for an algorithm, function, or code—not merely because a project question contains words like “implement” or “system”.
 """
 
 CODING_PROMPT = """###############################
@@ -399,6 +412,7 @@ When solving coding problems or technical assessment tasks:
 
 ===COMPLEXITY===
 Time: O(...) — explain in 5-10 words.
+
 Space: O(...) — explain in 5-10 words.
 
 ===CODE===
@@ -531,7 +545,7 @@ def format_api_error(exc: Exception) -> str:
     text = str(exc).lower()
     if "certificate verify failed" in text or "ssl" in text:
         return (
-            "SSL certificate error — run .\\scripts\\run.ps1 from interview-copilot, "
+            "SSL certificate error — launch from interview-copilot with start_interview_copilot.bat, "
             "then: pip install certifi. Or set SSL_VERIFY=false in .env (last resort)."
         )
     if isinstance(exc, APIConnectionError):
@@ -666,7 +680,7 @@ def get_parsed_resume_context() -> str:
     import config
     raw_resume = config.load_resume_context()
     if not raw_resume:
-        return "(No resume loaded — add resume_context.txt)"
+        return "(No resume loaded — add local_data/resume_context.txt)"
 
     try:
         data = json.loads(raw_resume)
@@ -681,10 +695,14 @@ def get_parsed_resume_context() -> str:
             summary = basics.get("summary")
             if name or label or summary or email:
                 parts.append("### CANDIDATE PROFILE")
-                if name: parts.append(f"Name: {name}")
-                if label: parts.append(f"Title/Role: {label}")
-                if email: parts.append(f"Email: {email}")
-                if summary: parts.append(f"Summary: {summary}")
+                if name:
+                    parts.append(f"Name: {name}")
+                if label:
+                    parts.append(f"Title/Role: {label}")
+                if email:
+                    parts.append(f"Email: {email}")
+                if summary:
+                    parts.append(f"Summary: {summary}")
                 parts.append("")
 
         # Skills & Tech Keywords
@@ -795,6 +813,7 @@ def generate_answer(
         temperature = 0.2
     else:
         if is_screen_scan:
+
             system = (
                 "You are solving a multiple-choice technical assessment question or conceptual question from a screenshot OCR.\n"
                 "Analyze the question and the options. State ONLY the correct option(s) or statement(s) verbatim, and a 1-sentence reasoning (if needed).\n"
@@ -823,12 +842,7 @@ def generate_answer(
                 role=config.JOB_ROLE,
                 job_desc=job_desc,
             )
-            user_msg = build_interview_user_prompt(
-                question=question,
-                conversation=[],
-                candidate_context="Candidate background and role are already included in the system instructions.",
-                max_turns=0,
-            )
+            user_msg = f"Interviewer question:\n{question}"
             max_tokens = 250
             temperature = 0.4
 
@@ -838,7 +852,6 @@ def generate_answer(
         messages.append(turn)
     messages.append({"role": "user", "content": user_msg})
 
-    winner_provider = None
     active_providers = config.get_active_providers()
     final_responses = {}
     threads = []
@@ -1096,6 +1109,7 @@ def solve_from_screenshot(
     job_desc = config.JOB_DESCRIPTION.strip()
 
     b64 = base64.standard_b64encode(image_jpeg).decode("ascii")
+
     prompt_template = VISION_SCREEN_PROMPT if force_coding else VISION_ASSESSMENT_PROMPT
     instructions = prompt_template.format(lang=lang)
 
@@ -1181,7 +1195,7 @@ def solve_from_screenshot(
         print("[openai_service] Fallback: Running local Windows OCR...", flush=True)
         try:
             from wboxai_app.win_ocr import run_win_ocr
-        except ImportError as ocr_import_error:
+        except ImportError:
             message = (
                 "OpenAI Vision failed and the local Windows OCR fallback is unavailable. "
                 "Install the Windows OCR dependencies from audio_processing/requirements-audio-enterprise.txt "

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 import threading
 from time import monotonic_ns
 from typing import Any

@@ -9,7 +9,6 @@ import numpy as np
 
 from PIL import Image
 
-import config
 from screen_capture import capture_screen_jpeg
 
 

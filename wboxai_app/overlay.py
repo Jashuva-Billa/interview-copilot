@@ -14,15 +14,12 @@ from PyQt6.QtCore import (
     pyqtSignal,
 )
 from PyQt6.QtGui import (
-    QAction,
-    QActionGroup,
     QBrush,
     QColor,
     QFont,
     QGuiApplication,
     QIcon,
     QKeySequence,
-    QMouseEvent,
     QPainter,
     QPainterPath,
     QPalette,
@@ -37,13 +34,11 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QMenu,
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QSlider,
     QTextEdit,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -52,7 +47,6 @@ import config
 from capture_exclude import apply_to_window
 from glass_effect import apply_glass_backdrop
 from glass_theme import stylesheet as glass_stylesheet
-from llm_project.response_parser import ParsedResponse
 
 _DRAG_STRIP_H = 28
 _RESIZE_GRIP = 22
@@ -573,7 +567,6 @@ class OverlayWindow(QMainWindow):
     capture_assessment_requested = pyqtSignal()
     submit_assessment_requested = pyqtSignal()
     clear_assessment_requested = pyqtSignal()
-    logout_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -587,6 +580,7 @@ class OverlayWindow(QMainWindow):
         self._layout_mode = "normal"
         self._saved_normal_geometry: QRect | None = None
         self._code_box_max_default = 200
+        self._contrast_mode: bool | None = None
         self.setMouseTracking(True)
         self._resize_dir = None
         self._resize_start_pos = None
@@ -606,7 +600,7 @@ class OverlayWindow(QMainWindow):
 
         self._contrast_timer = QTimer(self)
         self._contrast_timer.timeout.connect(self._check_screen_contrast)
-        self._contrast_timer.start(2000)
+        self._contrast_timer.start(250)
 
         self._auto_hide_timer = QTimer(self)
         self._auto_hide_timer.timeout.connect(self._on_auto_hide_timeout)
@@ -713,13 +707,6 @@ class OverlayWindow(QMainWindow):
         self.btn_refresh.setToolTip("Abort and Refresh LLM")
         self.btn_refresh.clicked.connect(self._on_refresh_clicked)
         header.addWidget(self.btn_refresh)
-
-        self.btn_logout = QPushButton("⏻")
-        self.btn_logout.setObjectName("logout")
-        self.btn_logout.setFixedSize(30, 30)
-        self.btn_logout.setToolTip("Logout — return to login screen")
-        self.btn_logout.clicked.connect(self._on_logout_clicked)
-        header.addWidget(self.btn_logout)
 
         self.btn_close = QPushButton("✕")
         self.btn_close.setObjectName("close")
@@ -958,7 +945,6 @@ class OverlayWindow(QMainWindow):
             self.btn_auto_scan,
             self.btn_share_hide,
             self.btn_refresh,
-            self.btn_logout,
             self.btn_listen,
             self.btn_close,
             self.blur_slider,
@@ -1097,10 +1083,14 @@ class OverlayWindow(QMainWindow):
             bottom = pos.y() > h - border
 
             direction = ""
-            if left: direction += "L"
-            if right: direction += "R"
-            if top: direction += "T"
-            if bottom: direction += "B"
+            if left:
+                direction += "L"
+            if right:
+                direction += "R"
+            if top:
+                direction += "T"
+            if bottom:
+                direction += "B"
 
             if direction:
                 self._resize_dir = direction
@@ -1218,18 +1208,6 @@ class OverlayWindow(QMainWindow):
             app.quit()
         else:
             self.close()
-
-    def _on_logout_clicked(self) -> None:
-        from PyQt6.QtWidgets import QMessageBox
-        reply = QMessageBox.question(
-            self,
-            "Logout",
-            "Are you sure you want to logout?\n\nYou will need to sign in again to use WboxAI.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            self.logout_requested.emit()
 
     def _on_configure_clicked(self) -> None:
         from installer import SetupWizard
@@ -1472,7 +1450,7 @@ class OverlayWindow(QMainWindow):
                 if response:
                     code_text = response.code or ""
                     if not code_text or code_text.strip().upper() == "N/A":
-                        code_text = f"// Generating assessment code solution... Please wait..."
+                        code_text = "// Generating assessment code solution... Please wait..."
                     self._set_plain_text_autoscroll(col["code_box"], code_text)
                 else:
                     self._set_plain_text_autoscroll(col["code_box"], "// Ready for assessment screenshots submission")
@@ -1549,6 +1527,11 @@ class OverlayWindow(QMainWindow):
             if not self.btn_coding.isChecked() and not self.btn_assessment.isChecked():
                 self._set_plain_text_autoscroll(col["answer_box"], "Generating...")
 
+    def set_question_preview(self, text: str) -> None:
+        """Update interim words without clearing the answer area."""
+        self._last_question = text
+        self._set_plain_text_autoscroll(self.question_box, text)
+
     def get_last_question(self) -> str:
         return self._last_question
 
@@ -1582,6 +1565,9 @@ class OverlayWindow(QMainWindow):
 
     def set_text_color_mode(self, is_light_bg: bool) -> None:
         """Dynamically update the text color and black/white shadow outlines."""
+        if self._contrast_mode == is_light_bg:
+            return
+        self._contrast_mode = is_light_bg
         color_str = "#000000" if is_light_bg else "#FFFFFF"
         shadow_color = QColor(255, 255, 255, 255) if is_light_bg else QColor(0, 0, 0, 255)
 
@@ -1753,26 +1739,6 @@ class OverlayWindow(QMainWindow):
                 btn.setStyleSheet(btn_refresh_style)
             elif obj_name == "close":
                 btn.setStyleSheet(btn_close_style)
-            elif obj_name == "logout":
-                # Logout button stays consistently red-tinted regardless of bg mode
-                btn.setStyleSheet("""
-                    QPushButton#logout {
-                        background: transparent;
-                        color: rgba(248, 113, 113, 200);
-                        border: none;
-                        height: 30px;
-                        width: 30px;
-                        border-radius: 15px;
-                        font-size: 16px;
-                        font-weight: normal;
-                        padding: 0;
-                        margin: 0px;
-                    }
-                    QPushButton#logout:hover {
-                        background-color: rgba(239, 68, 68, 35);
-                        color: rgba(252, 165, 165, 240);
-                    }
-                """)
 
         if hasattr(self, "blur_slider"):
             self.blur_slider.setStyleSheet(slider_style)

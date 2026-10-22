@@ -1,5 +1,4 @@
 from starlette.websockets import WebSocketState
-import asyncio
 from audio_processing_backend.prompt import HALLUCINATION_PHRASES
 
 def is_hallucination(text: str) -> bool:

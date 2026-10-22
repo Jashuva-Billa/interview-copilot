@@ -5,7 +5,7 @@ from starlette.websockets import WebSocketState
 import uvicorn
 from dotenv import load_dotenv
 
-from audio_processing_backend.utils import is_valid_webm, safe_send
+from audio_processing_backend.utils import safe_send
 from audio_processing_backend.services import llm_cleaning
 from audio_processing_backend.providers import get_stt_provider
 import os
@@ -71,7 +71,7 @@ async def websocket_listen(websocket: WebSocket, session_id: str):
     try:
         while True:
             # Keep the connection alive
-            data = await websocket.receive_text()
+            await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect_listener(websocket, session_id)
     except Exception as e:

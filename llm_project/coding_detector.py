@@ -3,9 +3,9 @@
 import re
 
 CODING_KEYWORDS = (
-    r"\b(implement|write\s+a\s+function|write\s+code|coding|algorithm|leetcode|"
+    r"\b(write\s+a\s+function|write\s+code|coding|leetcode|"
     r"hackerrank|coderpad|codility|white[\s-]?box|problem\s+statement|"
-    r"pair\s+program|data\s+structure|classify|temperature|"
+    r"pair\s+program|classify|temperature|"
     r"time\s+complexity|space\s+complexity|big\s*o|binary\s+search|"
     r"dynamic\s+programming|\bdp\b|recursion|iterate|array|linked\s+list|"
     r"binary\s+tree|graph|hash\s*map|stack|queue|heap|sort|substring|"

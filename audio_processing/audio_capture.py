@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import time
@@ -14,8 +15,19 @@ import sounddevice as sd
 import config
 
 SAMPLE_RATE = 16000
-FRAME_MS = 30
+# Small frames improve capture and VAD responsiveness without excessive callback overhead.
+FRAME_MS = max(10, int(os.getenv("AUDIO_FRAME_MS", "20")))
 FRAME_SAMPLES = int(SAMPLE_RATE * FRAME_MS / 1000)
+
+
+def _resample_linear(samples: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:
+    """Low-overhead resampling helper for small audio capture blocks."""
+    if source_rate == target_rate or samples.size == 0:
+        return np.asarray(samples, dtype=np.float32)
+    output_size = max(1, round(samples.size * target_rate / source_rate))
+    source_x = np.arange(samples.size, dtype=np.float32)
+    target_x = np.linspace(0, samples.size - 1, output_size, dtype=np.float32)
+    return np.interp(target_x, source_x, samples).astype(np.float32, copy=False)
 
 
 @dataclass
@@ -24,6 +36,8 @@ class AudioChunk:
     sample_rate: int
     emitted_at: float = 0.0
     speech_end_at: float = 0.0
+    utterance_id: str = ""
+    is_partial: bool = False
 
 
 def list_audio_devices() -> None:
@@ -46,20 +60,12 @@ def _device_name(device_id: Optional[int]) -> str:
 
 def _probe_input_device(device_id: Optional[int]) -> bool:
     """Return True if we can open a short-lived input stream."""
-    frames: list[np.ndarray] = []
-
     def _cb(indata, _frames, _time, _status):
-        mono = indata[:, 0] if indata.ndim > 1 else indata.flatten()
-        frames.append(mono.copy())
+        return None
 
     try:
-        kwargs = dict(
-            samplerate=SAMPLE_RATE,
-            channels=1,
-            dtype="float32",
-            blocksize=FRAME_SAMPLES,
-            callback=_cb,
-        )
+        kwargs = dict(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                      blocksize=FRAME_SAMPLES, callback=_cb)
         if device_id is not None:
             kwargs["device"] = device_id
         stream = sd.InputStream(**kwargs)
@@ -72,13 +78,9 @@ def _probe_input_device(device_id: Optional[int]) -> bool:
 
 
 def _windows_loopback_candidates() -> list[int]:
-    """
-    Prefer WDM-KS 'PC Speaker' — captures Meet/Zoom audio from speakers.
-    Stereo Mix is often disabled or broken on Windows 11.
-    """
+    """Prefer WDM-KS PC Speaker, then loopback and Stereo Mix inputs."""
     devices = sd.query_devices()
     ranked: list[tuple[int, int]] = []
-
     for i, dev in enumerate(devices):
         if dev.get("max_input_channels", 0) < 1:
             continue
@@ -89,7 +91,6 @@ def _windows_loopback_candidates() -> list[int]:
             ranked.append((1, i))
         elif "stereo mix" in name:
             ranked.append((2, i))
-
     ranked.sort(key=lambda x: x[0])
     return [i for _, i in ranked]
 
@@ -109,27 +110,18 @@ class WasapiLoopbackStream:
         device_info = self.p.get_device_info_by_index(self.device_index)
         self.channels = device_info["maxInputChannels"]
         self.native_rate = int(device_info["defaultSampleRate"])
-        self.native_blocksize = int(self.target_blocksize * self.native_rate / self.target_rate)
+        self.native_blocksize = max(1, round(self.target_blocksize * self.native_rate / self.target_rate))
 
         def py_callback(in_data, frame_count, time_info, status):
             try:
                 samples = np.frombuffer(in_data, dtype=np.float32)
                 if self.channels > 1:
-                    samples = samples.reshape(-1, self.channels)
-                    samples = samples[:, 0]
-                
-                if self.native_rate == self.target_rate or samples.size == 0:
-                    standardized = samples
-                else:
-                    output_size = max(1, round(samples.size * self.target_rate / self.native_rate))
-                    source_x = np.arange(samples.size, dtype=np.float64)
-                    target_x = np.linspace(0, samples.size - 1, output_size, dtype=np.float64)
-                    standardized = np.interp(target_x, source_x, samples).astype(np.float32)
-
-                standardized = standardized.reshape(-1, 1)
-                self.callback(standardized, self.target_blocksize, None, None)
-            except Exception:
-                pass
+                    samples = samples.reshape(-1, self.channels)[:, 0]
+                standardized = _resample_linear(samples, self.native_rate, self.target_rate)
+                self.callback(standardized.reshape(-1, 1), standardized.size, None, status)
+            except Exception as exc:
+                # Keep the real-time callback non-blocking; make problems visible for debugging.
+                print(f"[audio] loopback callback error: {exc}", flush=True)
             return (None, pyaudio.paContinue)
 
         self.stream = self.p.open(
@@ -139,7 +131,7 @@ class WasapiLoopbackStream:
             input=True,
             input_device_index=self.device_index,
             frames_per_buffer=self.native_blocksize,
-            stream_callback=py_callback
+            stream_callback=py_callback,
         )
         self.stream.start_stream()
 
@@ -171,7 +163,7 @@ def _find_loopback_device() -> Optional[int]:
         p = pyaudio.PyAudio()
         try:
             wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)
-            default_speakers = p.get_device_info_by_index(wasapi['defaultOutputDevice'])
+            default_speakers = p.get_device_info_by_index(wasapi["defaultOutputDevice"])
             for dev in p.get_loopback_device_info_generator():
                 if default_speakers["name"] in dev["name"]:
                     return dev["index"]
@@ -179,7 +171,6 @@ def _find_loopback_device() -> Optional[int]:
             p.terminate()
     except Exception:
         pass
-
     for device_id in _windows_loopback_candidates():
         if _probe_input_device(device_id):
             return device_id
@@ -193,14 +184,10 @@ def resolve_input_device(source: Optional[str] = None) -> tuple[Optional[int], b
     if source == "microphone":
         if _probe_input_device(None):
             return None, False, _device_name(None)
-        raise RuntimeError(
-            "Cannot open microphone. Check Windows Sound settings and try again."
-        )
-
+        raise RuntimeError("Cannot open microphone. Check Windows Sound settings and try again.")
     loopback = _find_loopback_device()
     if loopback is not None:
         return loopback, True, _device_name(loopback)
-
     raise RuntimeError(
         "System audio capture is unavailable. Enable Windows WASAPI loopback, "
         "a PC Speaker input, or Stereo Mix. The interviewer stream will not "
@@ -208,35 +195,59 @@ def resolve_input_device(source: Optional[str] = None) -> tuple[Optional[int], b
     )
 
 
-class EnergyVAD:
-    """Simple energy-based voice activity detection (no native deps)."""
+def partial_indicates_unfinished(text: str) -> bool:
+    """Detect partial transcripts that strongly suggest a clause is still in progress."""
+    value = " ".join((text or "").lower().split()).strip(" .,!?:;")
+    if not value:
+        return False
+    endings = (
+        "and", "or", "but", "because", "when", "while", "whereas", "which",
+        "that", "including", "with", "to", "for", "of", "in", "on", "from",
+        "such as", "how to", "what is the", "difference between",
+    )
+    return any(value == ending or value.endswith(" " + ending) for ending in endings)
 
+
+def adaptive_end_silence_ms(speech_duration_ms: int, unfinished: bool = False) -> int:
+    """Use a longer endpoint window only when the live partial sounds unfinished."""
+    base_ms = max(400, int(os.getenv("AUDIO_END_SILENCE_MS", "900")))
+    long_ms = max(base_ms, int(os.getenv("AUDIO_LONG_UTTERANCE_SILENCE_MS", "3000")))
+    if unfinished:
+        return long_ms
+    if speech_duration_ms >= 8000:
+        return long_ms
+    if speech_duration_ms >= 3000:
+        fraction = (speech_duration_ms - 3000) / 5000
+        return round(base_ms + (long_ms - base_ms) * fraction)
+    return base_ms
+
+
+class EnergyVAD:
+    """Simple energy-based voice activity detection (no native dependencies)."""
     def __init__(self, threshold: float = 0.012, *, loopback: bool = False):
-        # Loopback (Meet from speakers) is often quieter than a mic
         self.threshold = 0.006 if loopback else threshold
         self._noise_floor = 0.001
 
     def is_speech(self, frame: np.ndarray) -> bool:
-        energy = float(np.sqrt(np.mean(frame.astype(np.float64) ** 2)))
+        energy = float(np.sqrt(np.mean(frame.astype(np.float32) ** 2)))
         self._noise_floor = min(self._noise_floor * 0.995 + energy * 0.005, 0.05)
         return energy > max(self.threshold, self._noise_floor * 3.0)
 
 
 class SpeechRecorder:
-    """VAD-based recorder: emits full utterance chunks when speech ends."""
-
-    def __init__(
-        self,
-        on_chunk: Callable[[AudioChunk], None],
-        on_status: Optional[Callable[[str], None]] = None,
-        source: Optional[str] = None,
-    ):
+    """VAD recorder with fast snapshots and optional per-frame streaming audio."""
+    def __init__(self, on_chunk: Callable[[AudioChunk], None],
+                 on_status: Optional[Callable[[str], None]] = None,
+                 source: Optional[str] = None,
+                 on_partial: Optional[Callable[[AudioChunk], None]] = None,
+                 on_frame: Optional[Callable[[np.ndarray], None]] = None,
+                 stream_only: bool = False):
         self.on_chunk = on_chunk
+        self.on_partial = on_partial or (lambda _: None)
+        self.on_frame = on_frame
+        self.stream_only = stream_only
         self.source = source or config.AUDIO_SOURCE
         self.on_status = on_status or (lambda _: None)
-        # Bound callback buffering so a stalled processor cannot consume
-        # unbounded memory. Dropping one frame is preferable to blocking the
-        # real-time audio callback.
         self._queue: queue.Queue = queue.Queue(maxsize=500)
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -245,6 +256,19 @@ class SpeechRecorder:
         self._loopback = False
         self._device_label = ""
         self._vad = EnergyVAD(loopback=False)
+        self._partial_transcripts: dict[str, str] = {}
+        self._partial_transcripts_lock = threading.Lock()
+
+    def update_partial_transcript(self, utterance_id: str, text: str) -> None:
+        if not utterance_id or not text:
+            return
+        with self._partial_transcripts_lock:
+            self._partial_transcripts[utterance_id] = text
+
+    def _unfinished_partial(self, utterance_id: str) -> bool:
+        with self._partial_transcripts_lock:
+            text = self._partial_transcripts.get(utterance_id, "")
+        return partial_indicates_unfinished(text)
 
     def start(self) -> None:
         self._device, self._loopback, self._device_label = resolve_input_device(self.source)
@@ -266,36 +290,20 @@ class SpeechRecorder:
                 except queue.Full:
                     pass
 
-        kwargs = dict(
-            samplerate=SAMPLE_RATE,
-            channels=1,
-            dtype="float32",
-            blocksize=FRAME_SAMPLES,
-            callback=callback,
-        )
+        kwargs = dict(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                      blocksize=FRAME_SAMPLES, latency="low", callback=callback)
         if self._device is not None:
             kwargs["device"] = self._device
-        # Do NOT pass WasapiSettings on WDM-KS / Stereo Mix — it breaks the stream.
-
         if self._loopback:
-            self._stream = WasapiLoopbackStream(
-                device_index=self._device,
-                target_rate=SAMPLE_RATE,
-                target_blocksize=FRAME_SAMPLES,
-                callback=callback
-            )
+            self._stream = WasapiLoopbackStream(self._device, SAMPLE_RATE, FRAME_SAMPLES, callback)
             self._stream.start()
         else:
             self._stream = sd.InputStream(**kwargs)
             self._stream.start()
-
         self._stop.clear()
-        self._thread = threading.Thread(target=self._process_loop, daemon=True)
+        self._thread = threading.Thread(target=self._process_loop, daemon=True, name="speech-recorder-vad")
         self._thread.start()
-        if self._loopback:
-            src = f"system audio ({self._device_label})"
-        else:
-            src = f"microphone ({self._device_label})"
+        src = f"system audio ({self._device_label})" if self._loopback else f"microphone ({self._device_label})"
         self.on_status(f"Listening — {src}")
 
     def stop(self) -> None:
@@ -311,19 +319,20 @@ class SpeechRecorder:
                 pass
             self._stream = None
         if self._thread:
-            self._thread.join(timeout=20)
+            self._thread.join(timeout=5.0)
 
     def _process_loop(self) -> None:
         buffer: list[np.ndarray] = []
-        speech_frames = 0
-        silence_frames = 0
+        speech_frames = silence_frames = 0
         in_speech = False
-        min_speech_frames = int(350 / FRAME_MS)
-        # Shorter end-of-speech wait reduces question pickup latency. Keep a
-        # longer microphone window to avoid splitting the candidate mid-sentence.
-        end_silence_ms = 350 if self._loopback else 650
-        end_silence_frames = max(1, int(end_silence_ms / FRAME_MS))
-        max_frames = int(45000 / FRAME_MS)
+        min_speech_frames = max(1, int(250 / FRAME_MS))
+        utterance_counter = 0
+        utterance_id = ""
+        last_partial_at = 0.0
+        partial_interval_sec = max(0.15, float(os.getenv("AUDIO_PARTIAL_INTERVAL_MS", "300")) / 1000)
+        partial_min_frames = max(min_speech_frames, int(300 / FRAME_MS))
+        end_silence_frames = max(1, int(adaptive_end_silence_ms(0) / FRAME_MS))
+        max_frames = int(120000 / FRAME_MS)
         idle_frames = 0
         last_speech_at = 0.0
 
@@ -332,40 +341,61 @@ class SpeechRecorder:
                 frame = self._queue.get(timeout=0.2)
             except queue.Empty:
                 continue
-
             if len(frame) < FRAME_SAMPLES:
                 continue
             frame = frame[:FRAME_SAMPLES]
+            if self.on_frame:
+                try:
+                    self.on_frame(frame)
+                except Exception as exc:
+                    self.on_status(f"Streaming audio frame failed: {exc}")
+            if self.stream_only:
+                continue
             is_speech = self._vad.is_speech(frame)
 
             if is_speech:
-                last_speech_at = time.perf_counter()
+                now = time.perf_counter()
+                if not in_speech:
+                    utterance_counter += 1
+                    utterance_id = f"{id(self)}-{utterance_counter}"
+                    last_partial_at = 0.0
+                last_speech_at = now
                 buffer.append(frame)
                 speech_frames += 1
                 silence_frames = 0
+                end_silence_frames = max(1, int(adaptive_end_silence_ms(speech_frames * FRAME_MS) / FRAME_MS))
                 in_speech = True
                 idle_frames = 0
+                if speech_frames >= partial_min_frames and now - last_partial_at >= partial_interval_sec:
+                    self._emit(buffer, utterance_id=utterance_id, partial=True)
+                    last_partial_at = now
                 if speech_frames >= max_frames:
-                    self._emit(buffer, speech_end_at=last_speech_at)
+                    self.on_status("Long interviewer utterance reached 120-second safety limit")
+                    self._emit(buffer, speech_end_at=last_speech_at, utterance_id=utterance_id)
                     buffer = []
-                    speech_frames = 0
-                    silence_frames = 0
+                    speech_frames = silence_frames = 0
                     in_speech = False
+                    utterance_id = ""
+                    last_partial_at = 0.0
             elif in_speech:
                 buffer.append(frame)
                 silence_frames += 1
+                # Partial STT can arrive while silence is accumulating. Re-evaluate the
+                # endpoint every frame so an unfinished clause gets a longer grace window.
+                end_silence_frames = max(
+                    end_silence_frames,
+                    int(adaptive_end_silence_ms(
+                        speech_frames * FRAME_MS,
+                        unfinished=self._unfinished_partial(utterance_id),
+                    ) / FRAME_MS),
+                )
                 if silence_frames >= end_silence_frames and speech_frames >= min_speech_frames:
-                    self._emit(buffer, speech_end_at=last_speech_at)
+                    self._emit(buffer, speech_end_at=last_speech_at, utterance_id=utterance_id)
                     buffer = []
-                    speech_frames = 0
-                    silence_frames = 0
+                    speech_frames = silence_frames = 0
                     in_speech = False
-                elif speech_frames >= max_frames:
-                    self._emit(buffer)
-                    buffer = []
-                    speech_frames = 0
-                    silence_frames = 0
-                    in_speech = False
+                    utterance_id = ""
+                    last_partial_at = 0.0
             else:
                 idle_frames += 1
                 if idle_frames == int(15000 / FRAME_MS):
@@ -374,18 +404,15 @@ class SpeechRecorder:
                     self.on_status(f"Listening — waiting for {speaker} speech{hint}")
                     idle_frames = 0
 
-    def _emit(self, buffer: list[np.ndarray], speech_end_at: float = 0.0) -> None:
+    def _emit(self, buffer: list[np.ndarray], speech_end_at: float = 0.0, *,
+              utterance_id: str = "", partial: bool = False) -> None:
         if not buffer:
             return
         samples = np.concatenate(buffer)
-        if len(samples) < SAMPLE_RATE * 0.6:
+        if len(samples) < SAMPLE_RATE * 0.35:
             return
         emitted_at = time.perf_counter()
-        self.on_chunk(
-            AudioChunk(
-                samples=samples,
-                sample_rate=SAMPLE_RATE,
-                emitted_at=emitted_at,
-                speech_end_at=speech_end_at or emitted_at,
-            )
-        )
+        chunk = AudioChunk(samples=samples, sample_rate=SAMPLE_RATE, emitted_at=emitted_at,
+                           speech_end_at=speech_end_at or (0.0 if partial else emitted_at),
+                           utterance_id=utterance_id, is_partial=partial)
+        (self.on_partial if partial else self.on_chunk)(chunk)

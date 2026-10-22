@@ -2,7 +2,7 @@ import io
 import asyncio
 import os
 from openai import OpenAI
-from audio_processing_backend.utils import is_hallucination, is_valid_webm, is_valid_audio
+from audio_processing_backend.utils import is_hallucination, is_valid_audio
 from .base import STTProvider
 
 class OpenAIProvider(STTProvider):

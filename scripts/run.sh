@@ -25,4 +25,4 @@ echo "  Python: $PYTHON"
 echo "  Config: $ROOT/.env"
 echo ""
 
-exec "$PYTHON" "$ROOT/main.py"
+exec "$PYTHON" "$ROOT/app/main.py"

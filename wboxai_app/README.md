@@ -1,6 +1,6 @@
 # Interview Copilot
 
-AI-powered interview assistant with a **transparent overlay** that shows suggested answers while you are on a video call. On Windows, the overlay uses **capture exclusion** so it stays **visible to you** but is **not included** when you share your screen in Zoom, Teams, or Google Meet.
+AI-powered interview assistant with a transparent overlay for practice and accessibility. The overlay is configured to remain visible in screen shares by default.
 
 ## Features
 
@@ -24,7 +24,7 @@ AI-powered interview assistant with a **transparent overlay** that shows suggest
   - Shows **what to say** (approach) + **copy-paste code** in a separate panel
   - **Paste problem** button when the prompt is only on screen
 - **Transparent, draggable** always-on-top window
-- **Hidden from screen share** on Windows 10 version 2004+ (`SetWindowDisplayAffinity`)
+- **Visible in screen shares by default**
 
 ## Requirements
 
@@ -44,18 +44,21 @@ Interview Copilot is **self-contained** in `interview-copilot/`:
 |----------|-----------------|
 | Config | `interview-copilot/.env` |
 | Virtual env | `interview-copilot/venv/` |
-| Resume | `interview-copilot/resume_context.txt` |
+| Resume | `interview-copilot/local_data/resume_context.txt` |
 
 It does **not** read Outreach `.env`, Outreach `venv`, or parent folders.
 
-**Always start with:**
+**Windows launch:** use `start_interview_copilot.bat`. If needed, create the environment once:
 
 ```powershell
-cd interview-copilot
-.\scripts\run.ps1
+python -m venv venv
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+copy .env.example .env
 ```
 
-Do not run `python main.py` from another project's activated venv.
+Add your API key to `.env`, then launch the batch file. Use the app's **Configure** option to update settings; it does not create the virtual environment.
+
+Use `start_interview_copilot.bat` on Windows or `./scripts/run.sh` on macOS; do not use another project's virtual environment.
 
 ## Quick start
 
@@ -67,13 +70,12 @@ Do not run `python main.py` from another project's activated venv.
    # Edit .env — set OPENAI_API_KEY=sk-...
    ```
 
-2. Paste your resume into `resume_context.txt` (plain text).
+2. Paste your resume into `local_data/resume_context.txt` (plain text).
 
 3. Run:
 
    ```powershell
-   .\run.bat
-   # or: .\venv\Scripts\python.exe run_app.py
+   .\start_interview_copilot.bat
    ```
 
 4. Join your interview on the laptop. Position the overlay on a second monitor or corner of the screen.
@@ -106,7 +108,7 @@ Heavy work (screenshots, OpenAI) runs in a **background thread**. The UI thread 
 
 1. Use **speakers** (or earbuds as speaker output) so system audio is captured — not headphones-only with no loopback.
 2. Keep Meet volume up; status should show `Listening — system audio (PC Speaker ...)`.
-3. Wait until the interviewer **finishes** a sentence (~1s pause) — then you should see `Transcribing...` → `Generating answer...`.
+3. Wait until the interviewer **finishes** a sentence (~2s pause) — then you should see `Transcribing...` → `Generating answer...`.
 
 If loopback is not detected:
 
@@ -167,14 +169,7 @@ Notes:
 
 ## Screen sharing behavior
 
-The overlay is **invisible in screen share** on **Windows 10/11** (Zoom, Teams, Meet).
-
-With `OVERLAY_TRANSPARENT=true` (default), the overlay uses a **semi-transparent** panel so you can see through to your screen. Share-hide (`INVISIBLE_IN_SHARE=true`) is applied without stripping the layered window style. If the overlay still appears in a screen share on your PC, set `OVERLAY_TRANSPARENT=false` for an opaque panel (more reliable on some Windows builds).
-
-```env
-INVISIBLE_IN_SHARE=true
-OVERLAY_TRANSPARENT=true
-```
+The overlay is configured to be **visible in screen shares by default**. Capture exclusion is not enabled automatically; behavior can still vary by operating system and meeting application. For interviews and assessments, follow the host organization's rules and use the tool only where permitted.
 
 - **Ctrl+H** hide overlay · **Ctrl+Shift+H** show · **Esc** quit
 
@@ -248,9 +243,9 @@ This tool is for **personal practice and accessibility**. Using hidden overlays 
 interview-copilot/
   main.py              # App entry
   overlay.py           # Transparent PyQt6 UI + code panel
-  audio_capture.py     # Loopback + VAD recording
+  audio_processing/audio_capture.py  # Active loopback + microphone recorder
   openai_service.py    # Whisper + GPT (behavioral + coding)
-  audio_stt/           # Enterprise audio-to-text module (capture->VAD->STT)
+  audio_processing/audio_stt/        # Modular audio-to-text pipeline
   AUDIO_STT.md         # Audio pipeline design and operations notes
   coding_detector.py   # Auto-detect coding questions
   screen_capture.py    # Screenshot for Vision API
@@ -260,7 +255,6 @@ interview-copilot/
   win_capture_exclude.py
   requirements-audio-enterprise.txt
   config.py
-  resume_context.txt
-  run.bat              # Windows launcher
-  run_setup.bat        # Windows setup wizard
+  local_data/resume_context.txt
+  start_interview_copilot.bat  # Windows GUI launcher
 ```

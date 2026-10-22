@@ -1,0 +1,1 @@
+"""Interview Copilot automated tests."""

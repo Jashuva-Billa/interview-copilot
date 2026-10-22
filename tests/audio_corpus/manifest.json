@@ -1,0 +1,147 @@
+[
+  {
+    "id": "python_fast",
+    "topic": "python",
+    "expected_question": "Can you explain Python decorators and when you would use them?",
+    "audio_file": "python_fast.wav",
+    "voice_requested": "en-US-AriaNeural",
+    "engine": "edge_tts",
+    "duration_seconds": 4.28,
+    "sample_rate": 16000,
+    "accent_verified": true
+  },
+  {
+    "id": "python_pause",
+    "topic": "python",
+    "expected_question": "In Python, how do generators work?",
+    "audio_file": "python_pause.wav",
+    "voice_requested": "en-IN-NeerjaNeural",
+    "engine": "edge_tts",
+    "duration_seconds": 5.69,
+    "sample_rate": 16000,
+    "accent_verified": true
+  },
+  {
+    "id": "ml_feature_eng",
+    "topic": "machine_learning",
+    "expected_question": "What is feature engineering, and how would you handle missing values and categorical variables?",
+    "audio_file": "ml_feature_eng.wav",
+    "voice_requested": "en-GB-SoniaNeural",
+    "engine": "edge_tts",
+    "duration_seconds": 7.248,
+    "sample_rate": 16000,
+    "accent_verified": true
+  },
+  {
+    "id": "ml_overfit",
+    "topic": "machine_learning",
+    "expected_question": "Explain overfitting versus underfitting, and how cross validation helps.",
+    "audio_file": "ml_overfit.wav",
+    "voice_requested": "en-US-GuyNeural",
+    "engine": "edge_tts",
+    "duration_seconds": 6.626,
+    "sample_rate": 16000,
+    "accent_verified": true
+  },
+  {
+    "id": "genai_transformer",
+    "topic": "genai",
+    "expected_question": "How does the transformer architecture use self attention?",
+    "audio_file": "genai_transformer.wav",
+    "voice_requested": "en-IN-PrabhatNeural",
+    "engine": "edge_tts",
+    "duration_seconds": 5.182,
+    "sample_rate": 16000,
+    "accent_verified": true
+  },
+  {
+    "id": "genai_mispronounce",
+    "topic": "genai",
+    "expected_question": "How do you evaluate an L L M, and what is hallucination?",
+    "audio_file": "genai_mispronounce.wav",
+    "voice_requested": "en-IN-NeerjaNeural",
+    "engine": "edge_tts",
+    "duration_seconds": 6.618,
+    "sample_rate": 16000,
+    "accent_verified": true
+  },
+  {
+    "id": "rag_hybrid",
+    "topic": "rag",
+    "expected_question": "In RAG, how do you combine BM twenty five keyword search with vector similarity and reranking?",
+    "audio_file": "rag_hybrid.wav",
+    "voice_requested": "en-US-AriaNeural",
+    "engine": "edge_tts",
+    "duration_seconds": 8.108,
+    "sample_rate": 16000,
+    "accent_verified": true
+  },
+  {
+    "id": "rag_pause",
+    "topic": "rag",
+    "expected_question": "How would you investigate a RAG system that retrieves the right document but gives two different answers?",
+    "audio_file": "rag_pause.wav",
+    "voice_requested": "en-GB-RyanNeural",
+    "engine": "edge_tts",
+    "duration_seconds": 9.674,
+    "sample_rate": 16000,
+    "accent_verified": true
+  },
+  {
+    "id": "agentic_tools",
+    "topic": "agentic_ai",
+    "expected_question": "What is the difference between an AI agent and a normal L L M chain?",
+    "audio_file": "agentic_tools.wav",
+    "voice_requested": "en-IN-PrabhatNeural",
+    "engine": "edge_tts",
+    "duration_seconds": 6.684,
+    "sample_rate": 16000,
+    "accent_verified": true
+  },
+  {
+    "id": "agentic_langgraph",
+    "topic": "agentic_ai",
+    "expected_question": "How would you use Lang Graph, tool calling, and human in the loop approval in a production workflow?",
+    "audio_file": "agentic_langgraph.wav",
+    "voice_requested": "en-US-GuyNeural",
+    "engine": "edge_tts",
+    "duration_seconds": 7.286,
+    "sample_rate": 16000,
+    "accent_verified": true
+  },
+  {
+    "id": "python_pause_long",
+    "topic": "python",
+    "expected_question": "Can you explain asynchronous programming in Python?",
+    "audio_file": "python_pause_long.wav",
+    "voice_requested": "en-US-AriaNeural",
+    "engine": "edge_tts",
+    "duration_seconds": 6.35,
+    "sample_rate": 16000,
+    "accent_verified": true
+  },
+  {
+    "id": "ml_metrics",
+    "topic": "machine_learning",
+    "expected_question": "When would you choose precision, recall, F one score, or ROC AUC?",
+    "audio_file": "ml_metrics.wav",
+    "voice_requested": "en-GB-SoniaNeural",
+    "engine": "edge_tts",
+    "duration_seconds": 6.558,
+    "sample_rate": 16000,
+    "accent_verified": true
+  },
+  {
+    "id": "three_questions_with_separators",
+    "topic": "mixed",
+    "expected_question_ids": [
+      "python_fast",
+      "rag_hybrid",
+      "agentic_tools"
+    ],
+    "audio_file": "three_questions_with_separators.wav",
+    "duration_seconds": 25.672,
+    "sample_rate": 16000,
+    "purpose": "check separation versus mixed question segmentation"
+  }
+]
