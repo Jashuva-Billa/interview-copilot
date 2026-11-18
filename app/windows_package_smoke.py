@@ -23,6 +23,7 @@ CANDIDATE = "Can you repeat the question?"
 FOLLOW_UP = "What happens when all retries fail?"
 RECOVERED = "How would you monitor this?"
 ANSWER = "Use bounded exponential backoff."
+PDF_CONTEXT = "Deployment notes for the packaged regression."
 
 
 class Provider(BaseHTTPRequestHandler):
@@ -125,6 +126,28 @@ def feed(stream, rate, frequency, *, wasapi=False):
     assert position == len(samples)
 
 
+def make_context_pdf(path):
+    from pypdf import PdfWriter
+    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=320, height=160)
+    name = NameObject
+    page[name("/Resources")] = DictionaryObject({
+        name("/Font"): DictionaryObject({
+            name("/F1"): DictionaryObject({
+                name("/Type"): name("/Font"),
+                name("/Subtype"): name("/Type1"),
+                name("/BaseFont"): name("/Helvetica"),
+            })
+        })
+    })
+    content = DecodedStreamObject()
+    content.set_data(f"BT /F1 12 Tf 20 50 Td ({PDF_CONTEXT}) Tj ET".encode())
+    page.replace_contents(content)
+    writer.write(path)
+
+
 def check(app_runner, report):
     from app import credentials
     from audio_processing import audio_capture as capture
@@ -143,6 +166,8 @@ def check(app_runner, report):
     assert credentials.configure_openai()
     assert "sk-packaged-test" in Path(credentials.config.env_file_path()).read_text(encoding="utf-8")
     report.append("First-run key setup persisted in isolated profile")
+    if getattr(sys, "frozen", False):
+        make_context_pdf(Path(credentials.config.env_file_path()).with_name("deployment-notes.pdf"))
 
     pyaudio_device = {"name": "Virtual speaker loopback", "index": 1, "maxInputChannels": 2, "defaultSampleRate": 48000}
 
@@ -191,6 +216,9 @@ def check(app_runner, report):
         assert app.conversation[1]["content"] == ANSWER
         assert len(state.chat) == 2 and not failures and not quotas
         assert ANSWER in app.window.columns["openai"]["answer_box"].toPlainText()
+        if getattr(sys, "frozen", False):
+            assert PDF_CONTEXT in json.dumps(state.chat[0]["messages"])
+            report.append("Bundled PDF reader loaded context without launching a subprocess")
 
         feed(mic_stream, 16000, 880)
         wait(app.app, lambda: CANDIDATE in app.window.live_transcript_box.toPlainText(), "candidate transcript")

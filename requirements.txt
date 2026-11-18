@@ -11,3 +11,4 @@ mss>=9.0.0
 pillow>=10.0.0
 deepgram-sdk>=6.0.0
 pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
+pypdf>=5,<7
