@@ -10,7 +10,6 @@ This inventory records why files exist before moving or deleting them. It reflec
 | app/main.py | Runtime coordinator used by the packaged entry point | Keep |
 | packaging/main.spec | PyInstaller build definition | Keep until packaged-build validation is available |
 | app/core/project_bootstrap.py | Project-root and .env validation used by app/main.py and app/run_app.py | Keep; add isolated tests |
-| app/setup/installer.py | SetupWizard used by the overlay Configure action; also includes older install and web-login pages | Keep for now; split or simplify only after configuration-page behavior is covered |
 
 ## Active implementation groups
 
@@ -26,7 +25,6 @@ This inventory records why files exist before moving or deleting them. It reflec
 - wboxai_app/config.py, overlay.py, screen_capture.py, screen_watcher.py, capture_exclude.py, glass_effect.py, and glass_theme.py are resolved by the current Windows runner's sys.path setup.
 - wboxai_app/win_ocr.py is called by llm_project/openai_service.py as an optional Windows OCR fallback.
 - wboxai_app/token_tracker.py is imported by llm_project/openai_service.py for model-call reporting.
-- wboxai_app/login_dialog.py and whitebox_auth.py support the older browser login/session flow. They are not used by app/run_app.py's normal startup, but app/setup/installer.py still references session helpers and SetupWizard remains active for Configure. Audit this path before deleting it.
 
 ### Root-level implementation
 
@@ -63,6 +61,5 @@ This inventory records why files exist before moving or deleting them. It reflec
 2. Use the tests to decide a single authoritative runtime per OS, or explicitly keep platform-specific implementations in named packages.
 3. Replace sys.path-based module selection with explicit package imports.
 4. Consolidate duplicated config, response parsing, screen capture, overlay styling, and watcher code only after platform behavior has tests.
-5. Separate the active Configure form from the legacy web-login/install workflow inside installer.py.
 6. Test token/reporting and PDF context paths; add coverage for audio device lifecycle and worker error cleanup.
 7. Validate Windows and macOS startup and the packaged executable before deleting any platform-specific implementation.

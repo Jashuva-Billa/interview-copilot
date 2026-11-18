@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-for entry in (ROOT, ROOT / "app", ROOT / "app" / "core", ROOT / "app" / "services", ROOT / "app" / "ui", ROOT / "app" / "screen", ROOT / "app" / "monitoring", ROOT / "app" / "setup", ROOT / "wboxai_app", ROOT / "audio_processing", ROOT / "llm_project"):
+for entry in (ROOT, ROOT / "app", ROOT / "app" / "core", ROOT / "app" / "services", ROOT / "app" / "ui", ROOT / "app" / "screen", ROOT / "app" / "monitoring", ROOT / "wboxai_app", ROOT / "audio_processing", ROOT / "llm_project"):
     value = str(entry.resolve())
     if value not in sys.path:
         sys.path.insert(0, value)

@@ -2,13 +2,16 @@
 
 import os
 import sys
+from pathlib import Path
+
+root = Path(SPECPATH).resolve().parent
 
 mac = sys.platform == "darwin"
 a = Analysis(
-    ["app/run_app.py"],
-    pathex=["wboxai_app", "llm_project", "app", "app/core", "app/monitoring", "."],
+    [str(root / "app/run_app.py")],
+    pathex=[str(root / entry) for entry in ("wboxai_app", "llm_project", "app", "app/core", "app/monitoring", ".")],
     binaries=[(os.environ["COPILOT_MAC_AUDIO_HELPER"], ".")] if mac else [],
-    datas=[("wboxai_app/logo.png", "wboxai_app")],
+    datas=[(str(root / "wboxai_app/logo.png"), "wboxai_app")],
     hiddenimports=["app.credentials", "audio_processing.live_deepgram", "wboxai_app.win_ocr"],
     excludes=["PyQt6.QtQuick", "PyQt6.QtQml", "tkinter", "unittest"],
     noarchive=False,
@@ -32,7 +35,7 @@ else:
     exe = EXE(
         pyz, a.scripts, a.binaries, a.datas,
         name="Interview-Copilot",
-        icon="wboxai_app/logo.ico",
+        icon=str(root / "wboxai_app/logo.ico"),
         console=False,
         upx=False,
     )

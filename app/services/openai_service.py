@@ -143,8 +143,7 @@ def format_api_error(exc: Exception) -> str:
     text = str(exc).lower()
     if "certificate verify failed" in text or "ssl" in text:
         return (
-            "SSL certificate error — launch from interview-copilot with start_interview_copilot.bat, "
-            "then: pip install certifi. Or set SSL_VERIFY=false in .env (last resort)."
+            "SSL certificate verification failed. Check your computer’s trust settings or corporate proxy."
         )
     if isinstance(exc, APIConnectionError):
         return f"Cannot reach OpenAI — check internet/VPN. ({exc})"

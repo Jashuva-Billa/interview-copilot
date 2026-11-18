@@ -10,7 +10,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 _APP = _ROOT / "app"
 for _p in (
     _ROOT, _APP, _APP / "core", _APP / "services", _APP / "ui",
-    _APP / "screen", _APP / "monitoring", _APP / "setup",
+    _APP / "screen", _APP / "monitoring",
     _ROOT / "wboxai_app", _ROOT / "audio_processing", _ROOT / "llm_project",
 ):
     _s = str(_p)

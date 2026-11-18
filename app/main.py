@@ -12,7 +12,7 @@ _PROJECT_ROOT = _Path(__file__).resolve().parents[1]
 for _module_dir in (
     _PROJECT_ROOT, _PROJECT_ROOT / "app" / "core", _PROJECT_ROOT / "app" / "services",
     _PROJECT_ROOT / "app" / "ui", _PROJECT_ROOT / "app" / "screen",
-    _PROJECT_ROOT / "app" / "monitoring", _PROJECT_ROOT / "app" / "setup",
+    _PROJECT_ROOT / "app" / "monitoring",
     _PROJECT_ROOT / "audio_processing",
 ):
     _module_path = str(_module_dir)

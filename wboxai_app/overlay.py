@@ -1211,27 +1211,6 @@ class OverlayWindow(QMainWindow):
         else:
             self.close()
 
-    def _on_configure_clicked(self) -> None:
-        from installer import SetupWizard
-        
-        # Temporarily enable focus on main window so setup wizard works perfectly
-        old_flags = self.windowFlags()
-        if config.STEALTH_FOCUS:
-            self.setWindowFlags(old_flags & ~Qt.WindowType.WindowDoesNotAcceptFocus)
-            self.show()
-            
-        self.wizard = SetupWizard(config_only=True)
-        self.wizard.setWindowFlags(self.wizard.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-        
-        def on_wizard_closed():
-            if config.STEALTH_FOCUS:
-                self.setWindowFlags(old_flags)
-                self.show()
-            self.schedule_exclude()
-            
-        self.wizard.closed.connect(on_wizard_closed)
-        self.wizard.show()
-
     def _on_refresh_clicked(self) -> None:
         self.btn_refresh.trigger_spin()
         self.refresh_requested.emit()

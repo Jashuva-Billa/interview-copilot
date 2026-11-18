@@ -31,7 +31,6 @@ class LaunchContractTests(unittest.TestCase):
             "app/screen/screen_capture.py",
             "app/screen/screen_watcher.py",
             "app/monitoring/latency_tracker.py",
-            "app/setup/installer.py",
             "packaging/main.spec",
         )
         for relative in expected:
