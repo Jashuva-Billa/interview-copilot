@@ -61,9 +61,20 @@ def main() -> int:
     qt_app = QApplication(sys.argv)
     qt_app.setApplicationName("Interview Copilot")
     if _WINDOWS_PACKAGE_TEST:
-        from app.windows_package_smoke import run
+        import faulthandler
+        import traceback
 
-        return run(AppRunner)
+        with Path("package-diagnostics.log").open("w", encoding="utf-8") as diagnostics:
+            faulthandler.dump_traceback_later(20, repeat=True, file=diagnostics)
+            try:
+                from app.windows_package_smoke import run
+
+                return run(AppRunner)
+            except Exception:
+                traceback.print_exc(file=diagnostics)
+                return 1
+            finally:
+                faulthandler.cancel_dump_traceback_later()
     if "--package-smoke-test" in sys.argv:
         if "--expect-saved-key" in sys.argv and not config.openai_key_configured():
             return 3

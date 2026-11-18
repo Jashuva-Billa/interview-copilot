@@ -48,10 +48,14 @@ jobs:
           Copy-Item "$env:RUNNER_TEMP/copilot-dist/Interview-Copilot.exe" $exe
           try {
             $app = Start-Process -FilePath $exe -WorkingDirectory $folder -ArgumentList "--package-e2e-test" -PassThru
-            if (-not $app.WaitForExit(120000)) {
-              Stop-Process -Id $app.Id -Force
-              throw "Windows package regression timed out"
+            $timedOut = -not $app.WaitForExit(75000)
+            if ($timedOut) {
+              $app.Kill($true)
+              $app.WaitForExit()
             }
+            $diagnostics = Join-Path $env:COPILOT_PACKAGE_TEST_PROFILE "Interview Copilot/package-diagnostics.log"
+            if (Test-Path $diagnostics) { Get-Content -Encoding utf8 $diagnostics }
+            if ($timedOut) { throw "Windows package regression timed out" }
             $report = Join-Path $env:COPILOT_PACKAGE_TEST_PROFILE "Interview Copilot/package-smoke.log"
             if (Test-Path $report) { Get-Content -Encoding utf8 $report }
             if ($app.ExitCode -ne 0) { throw "Windows package regression exited with code $($app.ExitCode)" }
@@ -59,7 +63,8 @@ jobs:
             $env:LOCALAPPDATA = $env:COPILOT_PACKAGE_TEST_PROFILE
             $relaunch = Start-Process -FilePath $exe -WorkingDirectory $folder -ArgumentList "--package-smoke-test", "--expect-saved-key" -PassThru
             if (-not $relaunch.WaitForExit(60000)) {
-              Stop-Process -Id $relaunch.Id -Force
+              $relaunch.Kill($true)
+              $relaunch.WaitForExit()
               throw "Windows package relaunch timed out"
             }
             if ($relaunch.ExitCode -ne 0) { throw "Windows package relaunch failed" }
