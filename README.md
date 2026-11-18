@@ -4,6 +4,10 @@ A local desktop interview assistant for GenAI, machine learning, AI engineering,
 
 > **Important:** This application uses model APIs directly. It does **not** automate ChatGPT in a browser and does not send questions through the ChatGPT website. For OpenAI, it uses the OpenAI API with an API key from this project's local `.env`.
 
+## Windows audio setup
+
+Run Interview Copilot on the same Windows PC as your meeting. Set Meet or your other meeting app to play through the Windows default output device, and set your headset microphone as the Windows default input. Click **Start listening**. System playback drives the **Question** box, and the microphone goes to the spoken-answer transcript. Keep unrelated playback muted because system capture includes other apps using the same output.
+
 ## Interview modes
 
 - **Technical and behavioral Q&A.** Start listening to capture interviewer audio. Follow-ups use recent exchanges, and questions that revisit a topic can pull in an older matching exchange. The candidate microphone is recorded separately and does not trigger answers.

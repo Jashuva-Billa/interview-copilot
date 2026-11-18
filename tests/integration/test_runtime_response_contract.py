@@ -150,6 +150,7 @@ class TestRuntimeResponseContract(unittest.TestCase):
 
         self.assertEqual(len(self.runner.candidate_transcripts), before + 1)
         self.assertEqual(self.runner.candidate_transcripts[-1], "I used hybrid retrieval.")
+        self.assertIn("I used hybrid retrieval.", self.runner.window.live_transcript_box.toPlainText())
         generate.assert_not_called()
 
     def test_streamed_primary_answer_reaches_overlay_before_completion(self):

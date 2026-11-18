@@ -773,6 +773,8 @@ class OverlayWindow(QMainWindow):
         self.question_box.setMaximumHeight(72)
         self._make_see_through_edit(self.question_box)
         layout.addWidget(self.question_box)
+        self.live_transcript_box.setPlaceholderText("Your spoken answers from the microphone")
+        layout.addWidget(self.live_transcript_box)
 
         self.providers_layout = QHBoxLayout()
         self.providers_layout.setContentsMargins(0, 0, 0, 0)

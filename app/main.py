@@ -49,6 +49,7 @@ class WorkerBridge(QObject):
     status = pyqtSignal(str)
     question = pyqtSignal(str)
     question_preview = pyqtSignal(str)
+    spoken_answer = pyqtSignal(str, str)
     answer = pyqtSignal(object)
     error = pyqtSignal(str)
     scan_failed = pyqtSignal(str)
@@ -91,6 +92,8 @@ class InterviewApp:
         self.bridge.status.connect(self.window.status_changed.emit)
         self.bridge.question.connect(self.window.set_question)
         self.bridge.question_preview.connect(self.window.set_question_preview)
+        if hasattr(self.window, "update_live_transcript"):
+            self.bridge.spoken_answer.connect(self.window.update_live_transcript)
         self.bridge.answer.connect(self.window.answer_ready.emit)
         self.bridge.error.connect(self._on_error)
         self.bridge.scan_failed.connect(self._on_scan_failed)
@@ -464,7 +467,7 @@ class InterviewApp:
             text = transcribe(chunk.samples, chunk.sample_rate)
             if text:
                 self.candidate_transcripts.append(text)
-                self.bridge.status.emit(f"Your mic heard: {text[:180]}")
+                self.bridge.spoken_answer.emit("Your answer", text)
         except Exception as exc:
             self.bridge.status.emit(f"Microphone transcription failed: {format_api_error(exc)}")
             traceback.print_exc()

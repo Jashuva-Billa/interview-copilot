@@ -117,7 +117,7 @@ class WasapiLoopbackStream:
             try:
                 samples = np.frombuffer(in_data, dtype=np.float32)
                 if self.channels > 1:
-                    samples = samples.reshape(-1, self.channels)[:, 0]
+                    samples = samples.reshape(-1, self.channels).mean(axis=1)
                 standardized = _resample_linear(samples, self.native_rate, self.target_rate)
                 self.callback(standardized.reshape(-1, 1), standardized.size, None, status)
             except Exception as exc:
@@ -158,7 +158,7 @@ class WasapiLoopbackStream:
         self.stop()
 
 
-def _find_loopback_device() -> Optional[int]:
+def _find_loopback_device() -> tuple[int, str] | None:
     try:
         import pyaudiowpatch as pyaudio
         p = pyaudio.PyAudio()
@@ -167,28 +167,36 @@ def _find_loopback_device() -> Optional[int]:
             default_speakers = p.get_device_info_by_index(wasapi["defaultOutputDevice"])
             for dev in p.get_loopback_device_info_generator():
                 if default_speakers["name"] in dev["name"]:
-                    return dev["index"]
+                    return dev["index"], dev["name"]
         finally:
             p.terminate()
     except Exception:
         pass
-    for device_id in _windows_loopback_candidates():
-        if _probe_input_device(device_id):
-            return device_id
     return None
 
 
-def resolve_input_device(source: Optional[str] = None) -> tuple[Optional[int], bool, str]:
-    """Resolve an explicit source; system audio never silently becomes a mic."""
+@dataclass(frozen=True)
+class InputDevice:
+    index: int | None
+    label: str
+    system_audio: bool = False
+    wasapi: bool = False
+
+
+def resolve_input_device(source: Optional[str] = None) -> InputDevice:
+    """Resolve the source and retain the backend that owns its device index."""
     source = (source or config.AUDIO_SOURCE or "loopback").strip().lower()
-    source = "microphone" if source in ("microphone", "mic", "candidate") else "system"
-    if source == "microphone":
+    if source in ("microphone", "mic", "candidate"):
         if _probe_input_device(None):
-            return None, False, _device_name(None)
+            return InputDevice(None, _device_name(None))
         raise RuntimeError("Cannot open microphone. Check Windows Sound settings and try again.")
     loopback = _find_loopback_device()
     if loopback is not None:
-        return loopback, True, _device_name(loopback)
+        index, label = loopback
+        return InputDevice(index, label, system_audio=True, wasapi=True)
+    for index in _windows_loopback_candidates():
+        if _probe_input_device(index):
+            return InputDevice(index, _device_name(index), system_audio=True)
     raise RuntimeError(
         "System audio capture is unavailable. Enable Windows WASAPI loopback, "
         "a PC Speaker input, or Stereo Mix. The interviewer stream will not "
@@ -274,7 +282,8 @@ class SpeechRecorder:
         return partial_indicates_unfinished(text)
 
     def start(self) -> None:
-        self._device, self._loopback, self._device_label = resolve_input_device(self.source)
+        device = resolve_input_device(self.source)
+        self._device, self._loopback, self._device_label = device.index, device.system_audio, device.label
         self._vad = EnergyVAD(loopback=self._loopback)
 
         def callback(indata, _frames, _time, status):
@@ -297,7 +306,7 @@ class SpeechRecorder:
                       blocksize=FRAME_SAMPLES, latency="low", callback=callback)
         if self._device is not None:
             kwargs["device"] = self._device
-        if self._loopback:
+        if device.wasapi:
             self._stream = WasapiLoopbackStream(self._device, SAMPLE_RATE, FRAME_SAMPLES, callback)
             self._stream.start()
         else:
