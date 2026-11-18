@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import runpy
 import sys
 import tempfile
 import unittest
@@ -19,7 +20,7 @@ import project_bootstrap
 
 _TEST_ENV_DIR = tempfile.TemporaryDirectory(prefix="interview-copilot-tests-")
 _TEST_ENV_FILE = Path(_TEST_ENV_DIR.name) / ".env"
-_TEST_ENV_FILE.write_text("OPENAI_API_KEY=sk-test-placeholder\\n", encoding="utf-8")
+_TEST_ENV_FILE.write_text("OPENAI_API_KEY=sk-test-placeholder\n", encoding="utf-8")
 project_bootstrap.ENV_FILE = _TEST_ENV_FILE
 
 import run_app
@@ -30,7 +31,8 @@ from llm_project.response_parser import ParsedResponse
 class TestRuntimeResponseContract(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.runner = run_app.AppRunner()
+        with patch.object(main.config, "get_active_providers", return_value=["openai"]):
+            cls.runner = run_app.AppRunner()
 
     @classmethod
     def tearDownClass(cls):
@@ -38,6 +40,17 @@ class TestRuntimeResponseContract(unittest.TestCase):
         cls.runner.audio_executor.shutdown(wait=True)
         cls.runner.partial_executor.shutdown(wait=True)
         cls.runner.app.quit()
+
+    def test_windows_gui_launcher_reports_missing_env(self):
+        with (
+            patch.object(project_bootstrap, "bootstrap", side_effect=SystemExit("Missing .env")),
+            patch("PyQt6.QtWidgets.QMessageBox.critical") as show_error,
+            self.assertRaises(SystemExit) as exit_error,
+        ):
+            runpy.run_path(str(ROOT / "app" / "run_app.py"))
+
+        self.assertEqual(exit_error.exception.code, 1)
+        self.assertIn("Missing .env", show_error.call_args.args[2])
 
     def test_screenshot_response_is_wrapped_for_overlay(self):
         expected = ParsedResponse(
@@ -167,7 +180,7 @@ class TestRuntimeResponseContract(unittest.TestCase):
         self.runner.window.status_changed.connect(statuses.append)
         try:
             with patch.object(main, "generate_answer", return_value={}), patch.object(main.traceback, "print_exc"):
-                self.runner._generate_for_question("Explain a simple test.", force_coding=False)
+                self.runner._worker_force_coding("Explain a simple test.")
             self.assertFalse(self.runner._busy)
             self.assertTrue(any(status.startswith("Error:") for status in statuses))
         finally:
@@ -175,6 +188,48 @@ class TestRuntimeResponseContract(unittest.TestCase):
                 self.runner.window.status_changed.disconnect(statuses.append)
             except (TypeError, RuntimeError):
                 pass
+
+    def test_failed_scan_restores_overlay_and_releases_busy_state(self):
+        self.assertTrue(self.runner._try_start_work())
+        with (
+            patch.object(self.runner.window, "restore_after_screenshot") as restore,
+            patch.object(main, "capture_screen_jpeg", side_effect=RuntimeError("capture failed")),
+            patch.object(main.traceback, "print_exc"),
+        ):
+            self.runner._worker_capture_jpeg("high")
+        restore.assert_called_once_with()
+        self.assertFalse(self.runner._busy)
+
+    def test_force_coding_drains_transcripts_in_order(self):
+        self.assertTrue(self.runner._try_start_work())
+        first = "How would you deploy this?"
+        second = "How would you test it?"
+        with (
+            patch.object(self.runner, "_generate_for_question") as generate,
+            patch.object(self.runner.audio_executor, "submit") as submit,
+        ):
+            self.runner._on_stream_final(first)
+            self.runner._on_stream_final(second)
+            submit.assert_not_called()
+            self.runner._worker_force_coding("Write a test.")
+            generate.assert_called_once_with("Write a test.", True)
+            submit.assert_called_once_with(self.runner._worker_process_stream_question, first)
+            self.assertTrue(self.runner._busy)
+            self.runner._worker_process_stream_question(first)
+            self.assertEqual(submit.call_args.args, (self.runner._worker_process_stream_question, second))
+            self.runner._worker_process_stream_question(second)
+            self.assertFalse(self.runner._busy)
+
+    def test_snapshot_audio_waits_for_current_work(self):
+        self.assertTrue(self.runner._try_start_work())
+        chunk = main.AudioChunk(samples=[], sample_rate=16000)
+        with patch.object(self.runner.audio_executor, "submit") as submit:
+            self.runner._queue_question(chunk)
+            submit.assert_not_called()
+            self.runner._finish_work()
+            submit.assert_called_once_with(self.runner._worker_process_audio, chunk)
+        self.runner._finish_work()
+        self.assertFalse(self.runner._busy)
 
     def test_final_interviewer_transcript_triggers_one_llm_call(self):
         chunk = main.AudioChunk(
@@ -231,7 +286,8 @@ class TestRuntimeResponseContract(unittest.TestCase):
             self.assertEqual(received[-1]["provider"], "openai")
             self.assertIs(received[-1]["response"], expected)
             self.assertEqual(self.runner.conversation[-1]["content"], expected.full_text)
-            self.assertIn("openai", self.runner.window._last_responses)
+            answer_box = self.runner.window.columns["openai"]["answer_box"]
+            self.assertEqual(answer_box.toPlainText(), expected.full_text)
         finally:
             try:
                 self.runner.window.answer_ready.disconnect(received.append)

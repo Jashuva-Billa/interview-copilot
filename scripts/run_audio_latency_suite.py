@@ -6,7 +6,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 for p in (ROOT, ROOT / "wboxai_app", ROOT / "audio_processing", ROOT / "llm_project"):
-    if str(p) not in sys.path: sys.path.insert(0, str(p))
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
 from audio_processing.audio_capture import FRAME_SAMPLES, FRAME_MS, SAMPLE_RATE, SpeechRecorder, EnergyVAD
 CORPUS = ROOT / "tests" / "audio_corpus"
 REPORTS = ROOT / "reports"
@@ -14,9 +15,11 @@ REPORTS = ROOT / "reports"
 def read_wav(path):
     with wave.open(str(path), "rb") as f:
         rate, channels, width = f.getframerate(), f.getnchannels(), f.getsampwidth()
-        if width != 2: raise ValueError("Expected 16-bit PCM WAV: " + str(path))
+        if width != 2:
+            raise ValueError("Expected 16-bit PCM WAV: " + str(path))
         x = np.frombuffer(f.readframes(f.getnframes()), dtype="<i2").astype(np.float32) / 32768.0
-    if channels > 1: x = x.reshape(-1, channels).mean(axis=1)
+    if channels > 1:
+        x = x.reshape(-1, channels).mean(axis=1)
     if rate != SAMPLE_RATE:
         size = max(1, round(x.size * SAMPLE_RATE / rate))
         x = np.interp(np.linspace(0, x.size - 1, size), np.arange(x.size), x).astype(np.float32)
@@ -36,13 +39,17 @@ def replay(path, realtime):
     started = time.perf_counter()
     for offset in range(0, padded.size - FRAME_SAMPLES + 1, FRAME_SAMPLES):
         recorder._queue.put(padded[offset:offset + FRAME_SAMPLES], timeout=2)
-        if realtime: time.sleep(FRAME_MS / 1000)
-        elif offset % (FRAME_SAMPLES * 20) == 0: time.sleep(0.001)
+        if realtime:
+            time.sleep(FRAME_MS / 1000)
+        elif offset % (FRAME_SAMPLES * 20) == 0:
+            time.sleep(0.001)
     for _ in range(75):
         recorder._queue.put(np.zeros(FRAME_SAMPLES, dtype=np.float32), timeout=2)
-        if realtime: time.sleep(FRAME_MS / 1000)
+        if realtime:
+            time.sleep(FRAME_MS / 1000)
     deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and not recorder._queue.empty(): time.sleep(0.02)
+    while time.monotonic() < deadline and not recorder._queue.empty():
+        time.sleep(0.02)
     time.sleep(0.1)
     recorder._stop.set()
     worker.join(timeout=3)
@@ -100,8 +107,10 @@ def main():
             stt_times = []
             for chunk in c.pop("chunks"):
                 t0 = time.perf_counter()
-                try: texts.append(transcribe_fn(chunk.samples, chunk.sample_rate) or "")
-                except Exception as exc: texts.append("STT ERROR: " + str(exc)[:200])
+                try:
+                    texts.append(transcribe_fn(chunk.samples, chunk.sample_rate) or "")
+                except Exception as exc:
+                    texts.append("STT ERROR: " + str(exc)[:200])
                 stt_times.append(round((time.perf_counter()-t0)*1000, 1))
             c["transcripts"] = texts
             c["stt_latency_ms"] = stt_times
@@ -110,7 +119,8 @@ def main():
                 c["transcript_text"] = " ".join(texts)
                 c["word_coverage"] = round(coverage(c["expected_question"], c["transcript_text"]), 3)
                 c["question_fully_taken"] = c["word_coverage"] >= 0.90
-        else: c.pop("chunks")
+        else:
+            c.pop("chunks")
         report["cases"].append(c)
         print("{}: segments={} partials={} replay_ms={}".format(path.name, c["segments"], c["partial_events"], c["replay_processing_ms"]))
     REPORTS.mkdir(parents=True, exist_ok=True)

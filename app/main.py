@@ -27,6 +27,7 @@ import sys
 import threading
 import time
 import traceback
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
@@ -49,6 +50,7 @@ class WorkerBridge(QObject):
     question_preview = pyqtSignal(str)
     answer = pyqtSignal(object)
     error = pyqtSignal(str)
+    scan_failed = pyqtSignal(str)
     jpeg_ready = pyqtSignal(bytes, str)
     watch_jpeg_ready = pyqtSignal(bytes, bool)
 
@@ -66,8 +68,8 @@ class InterviewApp:
         self._partial_inflight = False
         self._pending_partial_chunk: AudioChunk | None = None
         self._finalized_utterances: set[str] = set()
-        self._stream_final_lock = threading.Lock()
-        self._pending_stream_questions: list[str] = []
+        self._work_lock = threading.Lock()
+        self._pending_questions: deque[str | AudioChunk] = deque()
         self._live_system_stt = None
         self._streaming_stt_active = False
         self.recorder: SpeechRecorder | None = None
@@ -88,6 +90,7 @@ class InterviewApp:
         self.bridge.question_preview.connect(self.window.set_question_preview)
         self.bridge.answer.connect(self.window.answer_ready.emit)
         self.bridge.error.connect(self._on_error)
+        self.bridge.scan_failed.connect(self._on_scan_failed)
         self.bridge.jpeg_ready.connect(self._on_scan_jpeg_ready)
         self.bridge.watch_jpeg_ready.connect(self._on_watch_jpeg_ready)
         self.window.listening_toggled.connect(self._on_listen_toggle)
@@ -100,25 +103,30 @@ class InterviewApp:
             self._watch_timer.start(config.SCREEN_WATCH_INTERVAL_SEC * 1000)
 
     def _on_error(self, msg: str) -> None:
-        self._busy = False
         self.window.status_changed.emit(f"Error: {msg}")
-        self._drain_pending_stream_question()
 
     def _on_force_coding(self) -> None:
         q = self.window.get_last_question().strip()
         if q:
+            if not self._try_start_work():
+                self.window.status_changed.emit("Busy — please wait...")
+                return
             self.window.status_changed.emit("Regenerating coding solution...")
-            self._busy = True
-            self.executor.submit(self._generate_for_question, q, True)
+            self.executor.submit(self._worker_force_coding, q)
         else:
             self._force_next_coding = True
             self.window.status_changed.emit("Coding mode armed for next question")
 
+    def _worker_force_coding(self, question: str) -> None:
+        try:
+            self._generate_for_question(question, True)
+        finally:
+            self._finish_work()
+
     def _on_scan_screen(self) -> None:
-        if self._busy:
+        if not self._try_start_work():
             self.window.status_changed.emit("Busy — please wait...")
             return
-        self._busy = True
         self._pending_scan_detail = "high"
         self.window.status_changed.emit("Capturing screen...")
         self.window.hide_for_screenshot()
@@ -133,8 +141,13 @@ class InterviewApp:
             quality = 88 if detail == "high" else None
             self.bridge.jpeg_ready.emit(capture_screen_jpeg(max_width=max_w, quality=quality), detail)
         except Exception as exc:
-            self.bridge.error.emit(format_api_error(exc))
+            self.bridge.scan_failed.emit(format_api_error(exc))
             traceback.print_exc()
+
+    def _on_scan_failed(self, msg: str) -> None:
+        self.window.restore_after_screenshot()
+        self._on_error(msg)
+        self._finish_work()
 
     def _on_scan_jpeg_ready(self, jpeg: bytes, detail: str) -> None:
         self.window.restore_after_screenshot()
@@ -154,8 +167,7 @@ class InterviewApp:
             self.bridge.error.emit(format_api_error(exc))
             traceback.print_exc()
         finally:
-            self._busy = False
-            self._drain_pending_stream_question()
+            self._finish_work()
 
     def _on_watch_toggle(self, enabled: bool) -> None:
         self._watcher.enabled = enabled
@@ -168,7 +180,7 @@ class InterviewApp:
             self.window.status_changed.emit("Watch off")
 
     def _watch_tick_start(self) -> None:
-        if self._busy or not self._watcher.enabled:
+        if not self._watcher.enabled or not self._try_start_work():
             return
         self.window.hide_for_screenshot()
         QTimer.singleShot(120, self._watch_step_capture)
@@ -186,10 +198,11 @@ class InterviewApp:
 
     def _on_watch_jpeg_ready(self, jpeg: bytes, changed: bool) -> None:
         self.window.restore_after_screenshot()
-        if changed and jpeg and not self._busy:
-            self._busy = True
+        if changed and jpeg and self._watcher.enabled:
             self.window.status_changed.emit("Screen changed — analyzing...")
             self.executor.submit(self._worker_solve_jpeg, jpeg, "low")
+        else:
+            self._finish_work()
 
     def _on_listen_toggle(self, listening: bool) -> None:
         if listening:
@@ -232,11 +245,7 @@ class InterviewApp:
         def on_system_chunk(chunk: AudioChunk) -> None:
             if self._streaming_stt_active:
                 return  # Deepgram's speech_final event is the final utterance boundary.
-            if self._busy:
-                self.bridge.status.emit("Question processing is busy; waiting for the next question...")
-                return
-            self._busy = True
-            self.audio_executor.submit(self._worker_process_audio, chunk)
+            self._queue_question(chunk)
 
         def on_system_partial(chunk: AudioChunk) -> None:
             if self._streaming_stt_active or self._busy or chunk.utterance_id in self._finalized_utterances:
@@ -304,15 +313,24 @@ class InterviewApp:
 
     def _on_stream_final(self, text: str) -> None:
         text = " ".join((text or "").split()).strip()
-        if not text:
-            return
-        with self._stream_final_lock:
-            if self._busy:
-                self._pending_stream_questions.append(text)
-                self.bridge.status.emit("Question queued while the previous answer finishes")
-                return
-            self._busy = True
-        self.audio_executor.submit(self._worker_process_stream_question, text)
+        if text:
+            self._queue_question(text)
+
+    def _queue_question(self, question: str | AudioChunk) -> None:
+        with self._work_lock:
+            queued = self._busy
+            if queued:
+                self._pending_questions.append(question)
+            else:
+                self._busy = True
+        if queued:
+            self.bridge.status.emit("Question queued while the current task finishes")
+        else:
+            self._submit_question(question)
+
+    def _submit_question(self, question: str | AudioChunk) -> None:
+        worker = self._worker_process_stream_question if isinstance(question, str) else self._worker_process_audio
+        self.audio_executor.submit(worker, question)
 
     def _worker_process_stream_question(self, text: str) -> None:
         try:
@@ -327,16 +345,22 @@ class InterviewApp:
             self.bridge.error.emit(format_api_error(exc))
             traceback.print_exc()
         finally:
-            self._busy = False
-            self._drain_pending_stream_question()
+            self._finish_work()
 
-    def _drain_pending_stream_question(self) -> None:
-        with self._stream_final_lock:
-            if not self._pending_stream_questions or self._busy:
-                return
-            pending = self._pending_stream_questions.pop(0)
+    def _try_start_work(self) -> bool:
+        with self._work_lock:
+            if self._busy:
+                return False
             self._busy = True
-        self.audio_executor.submit(self._worker_process_stream_question, pending)
+            return True
+
+    def _finish_work(self) -> None:
+        with self._work_lock:
+            if not self._pending_questions:
+                self._busy = False
+                return
+            pending = self._pending_questions.popleft()
+        self._submit_question(pending)
 
     def _stop_listening(self) -> None:
         for recorder in (self.mic_recorder, self.system_recorder):
@@ -416,8 +440,7 @@ class InterviewApp:
             self.bridge.error.emit(format_api_error(exc))
             traceback.print_exc()
         finally:
-            self._busy = False
-            self._drain_pending_stream_question()
+            self._finish_work()
 
     def _generate_for_question(self, text: str, force_coding: bool) -> None:
         generation_started = time.perf_counter()
@@ -460,8 +483,6 @@ class InterviewApp:
         except Exception as exc:
             self.bridge.error.emit(format_api_error(exc))
             traceback.print_exc()
-        finally:
-            self._busy = False
 
     def run(self) -> int:
         plat = "macOS" if config.IS_MAC else "Windows"

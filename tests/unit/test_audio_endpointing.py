@@ -14,7 +14,7 @@ for candidate in (ROOT, ROOT / "wboxai_app", ROOT / "app" / "core"):
         sys.path.insert(0, str(candidate))
 
 from audio_processing.audio_capture import (
-    FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE, AudioChunk, EnergyVAD,
+    FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE, EnergyVAD,
     SpeechRecorder, adaptive_end_silence_ms, partial_indicates_unfinished,
 )
 

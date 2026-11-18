@@ -43,10 +43,10 @@ _NO_RESUME = "--no-resume" in sys.argv
 try:
     from project_bootstrap import bootstrap
     bootstrap()
-except Exception as e:
+except (Exception, SystemExit) as e:
     from PyQt6.QtWidgets import QApplication, QMessageBox
     _app = QApplication.instance() or QApplication(sys.argv)
-    QMessageBox.critical(None, "Bootstrap Error", f"Failed to start WboxAI:\\n{e}")
+    QMessageBox.critical(None, "Bootstrap Error", f"Failed to start WboxAI:\n{e}")
     sys.exit(1)
 
 # ── now safe to import everything ─────────────────────────────────────────────

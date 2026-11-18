@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import sys
 import wave
 from pathlib import Path
@@ -39,7 +38,9 @@ def write_wav(path: Path, samples: np.ndarray) -> None:
     pcm = np.clip(samples * 32767, -32768, 32767).astype("<i2")
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as out:
-        out.setnchannels(1); out.setsampwidth(2); out.setframerate(RATE)
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(RATE)
         out.writeframes(pcm.tobytes())
 
 
@@ -50,7 +51,8 @@ def read_wav(path: Path) -> np.ndarray:
     if width != 2:
         raise ValueError(f"Expected 16-bit WAV: {path}")
     x = np.frombuffer(data, dtype="<i2").astype(np.float32) / 32768.0
-    if channels > 1: x = x.reshape(-1, channels).mean(axis=1)
+    if channels > 1:
+        x = x.reshape(-1, channels).mean(axis=1)
     if rate != RATE:
         size = max(1, round(x.size * RATE / rate))
         x = np.interp(np.linspace(0, x.size - 1, size), np.arange(x.size), x).astype(np.float32)
@@ -82,13 +84,18 @@ def sapi_clip(text: str, path: Path, rate: float) -> str:
     # Alternate installed voices for timbre diversity; accent diversity is limited
     # to what the operating system actually has installed.
     voice = voices[(len(list(OUT.glob("*.wav"))) % len(voices))] if voices else None
-    if voice: engine.setProperty("voice", voice.id)
+    if voice:
+        engine.setProperty("voice", voice.id)
     engine.setProperty("rate", max(100, min(230, int(175 * rate))))
     temp = path.with_suffix(".sapi.wav")
-    engine.save_to_file(text, str(temp)); engine.runAndWait(); engine.stop()
+    engine.save_to_file(text, str(temp))
+    engine.runAndWait()
+    engine.stop()
     if not temp.exists() or temp.stat().st_size < 1000:
         raise RuntimeError("Windows SAPI did not produce a WAV file")
-    x = read_wav(temp); write_wav(path, x); temp.unlink(missing_ok=True)
+    x = read_wav(temp)
+    write_wav(path, x)
+    temp.unlink(missing_ok=True)
     return getattr(voice, "name", "Windows SAPI default")
 
 
