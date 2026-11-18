@@ -599,7 +599,6 @@ class OverlayWindow(QMainWindow):
 
     def set_question_preview(self, text: str) -> None:
         """Update the live transcript without resetting answer panels."""
-        self._last_question = text
         self.question_box.setPlainText(text)
 
     def get_last_question(self) -> str:

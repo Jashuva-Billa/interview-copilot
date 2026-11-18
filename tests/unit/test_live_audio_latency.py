@@ -82,6 +82,28 @@ class LiveAudioLatencyTests(unittest.TestCase):
         self.assertEqual(stt._committed, [])
         self.assertEqual(stt._interim, "")
 
+    def test_empty_speech_boundary_closes_a_pending_multiclause_question(self):
+        finals = []
+        stt = object.__new__(LiveDeepgramTranscriber)
+        stt._on_partial = lambda _: None
+        stt._on_final = finals.append
+        stt._committed = []
+        stt._interim = ""
+        stt._lock = threading.Lock()
+        stt._pending_final_text = ""
+        stt._final_flush_task = None
+
+        async def exercise():
+            await stt._handle_transcript("Explain RAG and", segment_final=True, speech_final=True)
+            await asyncio.sleep(1.05)
+            self.assertEqual(finals, [])
+            await stt._handle_transcript("when you would use reranking", segment_final=True)
+            await stt._handle_transcript("", speech_final=True)
+            await asyncio.wait_for(stt._final_flush_task, timeout=2)
+
+        asyncio.run(exercise())
+        self.assertEqual(finals, ["Explain RAG and when you would use reranking"])
+
     def test_streaming_mode_requires_key_but_does_not_touch_api_until_instantiated(self):
         with self.assertRaisesRegex(ValueError, "DEEPGRAM_API_KEY"):
             LiveDeepgramTranscriber("", lambda _: None, lambda _: None)

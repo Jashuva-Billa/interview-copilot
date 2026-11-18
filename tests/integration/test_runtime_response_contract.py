@@ -52,6 +52,33 @@ class TestRuntimeResponseContract(unittest.TestCase):
         self.assertEqual(exit_error.exception.code, 1)
         self.assertIn("Missing .env", show_error.call_args.args[2])
 
+    def test_assessment_buttons_capture_submit_and_clear(self):
+        from openai_service import ParsedResponse
+
+        runner = self.runner
+        runner.window.btn_assessment.setChecked(True)
+        try:
+            with patch.object(main.QTimer, "singleShot"), patch.object(runner.executor, "submit") as submit:
+                runner.window.capture_assessment_requested.emit()
+                runner._on_scan_jpeg_ready(b"first", "assessment")
+                runner.window.capture_assessment_requested.emit()
+                runner._on_scan_jpeg_ready(b"second", "assessment")
+                runner.window.submit_assessment_requested.emit()
+                submit.assert_called_once_with(runner._worker_solve_assessment, [b"first", b"second"])
+
+            response = ParsedResponse(
+                is_coding=True, approach="", code="print(42)", complexity="",
+                edge_cases="", full_text="print(42)", problem_text="Implement the program.",
+            )
+            with patch("openai_service.solve_assessment_multi_image", return_value=("Done", response)):
+                runner._worker_solve_assessment([b"first", b"second"])
+            self.assertEqual(runner.window.columns["openai"]["code_box"].toPlainText(), "print(42)")
+            runner.window.clear_assessment_requested.emit()
+            self.assertEqual(runner.window.btn_submit_assessment.text(), "Submit (0)")
+        finally:
+            runner.window.btn_assessment.setChecked(False)
+            runner.window.btn_coding.setChecked(False)
+
     def test_screenshot_response_is_wrapped_for_overlay(self):
         expected = ParsedResponse(
             is_coding=True,

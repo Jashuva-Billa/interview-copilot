@@ -5,7 +5,7 @@ import re
 CODING_KEYWORDS = (
     r"\b(write\s+a\s+function|write\s+code|coding|leetcode|"
     r"hackerrank|coderpad|codility|white[\s-]?box|problem\s+statement|"
-    r"pair\s+program|classify|temperature|"
+    r"pair\s+program|"
     r"time\s+complexity|space\s+complexity|big\s*o|binary\s+search|"
     r"dynamic\s+programming|\bdp\b|recursion|iterate|array|linked\s+list|"
     r"binary\s+tree|graph|hash\s*map|stack|queue|heap|sort|substring|"
@@ -13,7 +13,7 @@ CODING_KEYWORDS = (
     r"memoization|topological|parentheses|anagram|permutation|"
     r"fibonacci|reverse\s+the|find\s+the\s+index|return\s+an\s+array|"
     r"given\s+an\s+array|given\s+a\s+string|integer\s+array|"
-    r"constraints?\s*:|examples?\s*:|input:\s*|output:\s*|follow[\s-]?up|"
+    r"constraints?\s*:|examples?\s*:|input:\s*|output:\s*|"
     r"run\s+test\s+cases|submit\s+this|pass\s+#\s*implement)\b"
 )
 
@@ -25,13 +25,24 @@ _CODING_SIGNATURE_RE = re.compile(
 )
 
 _PATTERN = re.compile(CODING_KEYWORDS, re.IGNORECASE)
+_CONCEPTUAL = re.compile(
+    r"^(?:what (?:is|are)\b|why\b|how (?:does|do)\b|explain\b|describe\b|compare\b)",
+    re.IGNORECASE,
+)
+_IMPLEMENTATION = re.compile(
+    r"\b(?:implement|write (?:a|an|the|some) (?:function|program|solution|code|script)"
+    r"|write code|code up|solve (?:this|the) (?:problem|challenge))\b",
+    re.IGNORECASE,
+)
 
 
 def is_coding_question(text: str, force: bool = False) -> bool:
     if force:
         return True
-    if _CODING_SIGNATURE_RE.search(text):
+    if _CODING_SIGNATURE_RE.search(text) or _IMPLEMENTATION.search(text):
         return True
+    if _CONCEPTUAL.match(text.strip()):
+        return False
     if len(text.split()) < 3:
         return False
     if _PATTERN.search(text):

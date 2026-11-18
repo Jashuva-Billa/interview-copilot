@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import QApplication
 
 import config
 from audio_processing.audio_capture import AudioChunk, SpeechRecorder
+from audio_processing.interviewer_turn import InterviewerTurn
 from openai_service import (
     check_ssl_connectivity, format_api_error, generate_answer,
     solve_from_screenshot, transcribe,
@@ -70,6 +71,8 @@ class InterviewApp:
         self._finalized_utterances: set[str] = set()
         self._work_lock = threading.Lock()
         self._pending_questions: deque[str | AudioChunk] = deque()
+        self._interviewer_turn = InterviewerTurn()
+        self._assessment_images: list[bytes] = []
         self._live_system_stt = None
         self._streaming_stt_active = False
         self.recorder: SpeechRecorder | None = None
@@ -97,6 +100,10 @@ class InterviewApp:
         self.window.force_coding_requested.connect(self._on_force_coding)
         self.window.scan_screen_requested.connect(self._on_scan_screen)
         self.window.watch_screen_toggled.connect(self._on_watch_toggle)
+        if hasattr(self.window, "capture_assessment_requested"):
+            self.window.capture_assessment_requested.connect(self._on_capture_assessment)
+            self.window.submit_assessment_requested.connect(self._on_submit_assessment)
+            self.window.clear_assessment_requested.connect(self._on_clear_assessment)
 
         if config.SCREEN_WATCH_ENABLED:
             self._watcher.enabled = True
@@ -132,13 +139,56 @@ class InterviewApp:
         self.window.hide_for_screenshot()
         QTimer.singleShot(120, self._scan_step_capture)
 
+    def _on_capture_assessment(self) -> None:
+        if not self._try_start_work():
+            self.window.status_changed.emit("Busy — please wait...")
+            return
+        self._pending_scan_detail = "assessment"
+        self.window.hide_for_screenshot()
+        QTimer.singleShot(120, self._scan_step_capture)
+
+    def _on_clear_assessment(self) -> None:
+        if self._busy:
+            return
+        self._assessment_images.clear()
+        self.window.update_assessment_count(0)
+
+    def _on_submit_assessment(self) -> None:
+        if not self._assessment_images:
+            self.window.update_assessment_count(0)
+            return
+        if not self._try_start_work():
+            self.window.status_changed.emit("Busy — please wait...")
+            return
+        self.window.status_changed.emit("Analyzing assessment screenshots...")
+        self.executor.submit(self._worker_solve_assessment, self._assessment_images.copy())
+
+    def _worker_solve_assessment(self, images: list[bytes]) -> None:
+        try:
+            from openai_service import solve_assessment_multi_image
+
+            def show_answer(response) -> None:
+                self.bridge.answer.emit({"provider": "openai", "response": response})
+
+            problem, response = solve_assessment_multi_image(images, on_chunk=show_answer)
+            if not response.code.strip():
+                raise RuntimeError(response.approach or "The assessment provider returned no code.")
+            self.bridge.question.emit(response.problem_text or problem)
+            show_answer(response)
+            self.bridge.status.emit("Assessment solution ready")
+        except Exception as exc:
+            self.bridge.error.emit(format_api_error(exc))
+            traceback.print_exc()
+        finally:
+            self._finish_work()
+
     def _scan_step_capture(self) -> None:
         self.executor.submit(self._worker_capture_jpeg, self._pending_scan_detail)
 
     def _worker_capture_jpeg(self, detail: str) -> None:
         try:
-            max_w = 1920 if detail == "high" else None
-            quality = 88 if detail == "high" else None
+            max_w = 1920 if detail in {"high", "assessment"} else None
+            quality = 88 if detail in {"high", "assessment"} else None
             self.bridge.jpeg_ready.emit(capture_screen_jpeg(max_width=max_w, quality=quality), detail)
         except Exception as exc:
             self.bridge.scan_failed.emit(format_api_error(exc))
@@ -151,6 +201,11 @@ class InterviewApp:
 
     def _on_scan_jpeg_ready(self, jpeg: bytes, detail: str) -> None:
         self.window.restore_after_screenshot()
+        if detail == "assessment":
+            self._assessment_images.append(jpeg)
+            self.window.update_assessment_count(len(self._assessment_images))
+            self._finish_work()
+            return
         self.window.status_changed.emit("Reading problem (AI vision)...")
         self.executor.submit(self._worker_solve_jpeg, jpeg, detail)
 
@@ -231,10 +286,11 @@ class InterviewApp:
                         on_final=self._on_stream_final,
                         on_status=self._on_stream_status,
                     )
-                    self._live_system_stt.start()
                     self._streaming_stt_active = True
+                    self._live_system_stt.start()
                     stream_note = "Word-level streaming (Deepgram)"
                 except Exception as exc:
+                    self._streaming_stt_active = False
                     self._live_system_stt = None
                     self.bridge.status.emit(f"Streaming STT unavailable; using OpenAI previews: {exc}")
             else:
@@ -275,8 +331,6 @@ class InterviewApp:
             )
             self.system_recorder.start()
             self.recorder = self.system_recorder
-            self.mic_recorder = SpeechRecorder(on_chunk=on_mic_chunk, on_status=on_mic_status, source="microphone")
-            self.mic_recorder.start()
         except Exception as exc:
             for recorder in (self.mic_recorder, self.system_recorder):
                 if recorder is not None:
@@ -293,8 +347,17 @@ class InterviewApp:
             self.window.set_listening_state(False)
             return
 
+        try:
+            self.mic_recorder = SpeechRecorder(on_chunk=on_mic_chunk, on_status=on_mic_status, source="microphone")
+            self.mic_recorder.start()
+        except Exception as exc:
+            if self.mic_recorder is not None:
+                self.mic_recorder.stop()
+            self.mic_recorder = None
+            self.bridge.status.emit(f"Candidate microphone unavailable: {format_api_error(exc)}")
+
         system_label = getattr(self.system_recorder, "_device_label", "system input")
-        mic_label = getattr(self.mic_recorder, "_device_label", "default microphone")
+        mic_label = getattr(self.mic_recorder, "_device_label", "unavailable")
         self.window.status_changed.emit(f"Listening | Interviewer: {system_label[:36]} | Your mic: {mic_label[:36]} | {stream_note}")
 
     def _on_stream_status(self, msg: str) -> None:
@@ -334,13 +397,7 @@ class InterviewApp:
 
     def _worker_process_stream_question(self, text: str) -> None:
         try:
-            if len(text.split()) < 2:
-                self.bridge.question.emit(text)
-                self.bridge.status.emit(f"Heard: \"{text}\" — waiting for a complete question...")
-            else:
-                force = self._force_next_coding
-                self._force_next_coding = False
-                self._generate_for_question(text, force)
+            self._process_interviewer_text(text)
         except Exception as exc:
             self.bridge.error.emit(format_api_error(exc))
             traceback.print_exc()
@@ -429,18 +486,21 @@ class InterviewApp:
             if not text:
                 self.bridge.status.emit("Could not hear speech — turn up Meet volume / use speakers")
                 return
-            if len(text.split()) < 2:
-                self.bridge.question.emit(text)
-                self.bridge.status.emit(f"Heard: \"{text}\" — waiting for a complete question...")
-                return
-            force = self._force_next_coding
-            self._force_next_coding = False
-            self._generate_for_question(text, force)
+            self._process_interviewer_text(text)
         except Exception as exc:
             self.bridge.error.emit(format_api_error(exc))
             traceback.print_exc()
         finally:
             self._finish_work()
+
+    def _process_interviewer_text(self, transcript: str) -> None:
+        question = self._interviewer_turn.accept(transcript)
+        if not question:
+            self.bridge.status.emit("Waiting for a complete interviewer question...")
+            return
+        force = self._force_next_coding
+        self._force_next_coding = False
+        self._generate_for_question(question, force)
 
     def _generate_for_question(self, text: str, force_coding: bool) -> None:
         generation_started = time.perf_counter()

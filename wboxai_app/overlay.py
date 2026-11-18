@@ -1273,9 +1273,10 @@ class OverlayWindow(QMainWindow):
         self.listening_toggled.emit(self._listening)
         self.schedule_exclude()
 
-    def _on_force_coding_click(self, *args) -> None:
+    def _on_force_coding_click(self, checked: bool) -> None:
         self._update_all_responses_layout()
-        self.force_coding_requested.emit()
+        if checked and not self.btn_assessment.isChecked():
+            self.force_coding_requested.emit()
         self.schedule_exclude()
 
     def set_coding_busy(self, busy: bool) -> None:
@@ -1303,12 +1304,12 @@ class OverlayWindow(QMainWindow):
 
     def _on_assessment_toggle(self, checked: bool) -> None:
         if checked:
-            self.btn_coding.setChecked(True)
             self.assessment_bar_widget.show()
             self.status_label.setText("Assessment Mode active: Capture screenshots then click Submit.")
         else:
             self.assessment_bar_widget.hide()
             self.status_label.setText("Ready")
+        self._update_all_responses_layout()
         self.assessment_mode_toggled.emit(checked)
         self.schedule_exclude()
 
@@ -1529,7 +1530,6 @@ class OverlayWindow(QMainWindow):
 
     def set_question_preview(self, text: str) -> None:
         """Update interim words without clearing the answer area."""
-        self._last_question = text
         self._set_plain_text_autoscroll(self.question_box, text)
 
     def get_last_question(self) -> str:

@@ -846,18 +846,15 @@ def generate_answer(
             max_tokens = 250
             temperature = 0.4
 
-    messages = [{"role": "system", "content": system}]
+    from llm_project.interview_context import select_interview_history
 
-    for turn in conversation[-6:]:
-        messages.append(turn)
-    messages.append({"role": "user", "content": user_msg})
-
+    history = select_interview_history(question, conversation)
     active_providers = config.get_active_providers()
     final_responses = {}
     threads = []
 
     openai_messages = [{"role": "system", "content": system}]
-    for turn in conversation[-6:]:
+    for turn in history:
         openai_messages.append(turn)
     openai_messages.append({"role": "user", "content": user_msg})
 
@@ -935,7 +932,7 @@ def generate_answer(
                 return
 
             contents = []
-            for turn in conversation[-6:]:
+            for turn in history:
                 role = "user" if turn["role"] == "user" else "model"
                 contents.append({
                     "role": role,
@@ -1005,7 +1002,7 @@ def generate_answer(
                 return
 
             messages = []
-            for turn in conversation[-6:]:
+            for turn in history:
                 messages.append({
                     "role": turn["role"],
                     "content": turn["content"]

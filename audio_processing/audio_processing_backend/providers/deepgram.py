@@ -34,14 +34,12 @@ class DeepgramProvider(STTProvider):
                     try:
                         channel = getattr(message, "channel", None)
                         alternatives = getattr(channel, "alternatives", None)
-                        if not alternatives:
-                            return
-                        alt = alternatives[0]
+                        speech_final = bool(getattr(message, "speech_final", False))
+                        alt = alternatives[0] if alternatives else None
                         sentence = (getattr(alt, "transcript", "") or "").strip()
-                        if not sentence:
+                        if not sentence and not speech_final:
                             return
                         segment_final = bool(getattr(message, "is_final", False))
-                        speech_final = bool(getattr(message, "speech_final", False))
                         confidence = getattr(alt, "confidence", None)
                         speakers = []
                         for word in (getattr(alt, "words", None) or []):

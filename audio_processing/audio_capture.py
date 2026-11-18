@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -200,6 +201,8 @@ def partial_indicates_unfinished(text: str) -> bool:
     value = " ".join((text or "").lower().split()).strip(" .,!?:;")
     if not value:
         return False
+    if re.fullmatch(r"(?:what|how|why|when|where|which|who)(?: (?:is|are|can|could|do|does|did|would|will|should|was|were)(?: (?:you|we|it|they|the|a))?)?", value):
+        return True
     endings = (
         "and", "or", "but", "because", "when", "while", "whereas", "which",
         "that", "including", "with", "to", "for", "of", "in", "on", "from",
@@ -389,8 +392,9 @@ class SpeechRecorder:
                         unfinished=self._unfinished_partial(utterance_id),
                     ) / FRAME_MS),
                 )
-                if silence_frames >= end_silence_frames and speech_frames >= min_speech_frames:
-                    self._emit(buffer, speech_end_at=last_speech_at, utterance_id=utterance_id)
+                if silence_frames >= end_silence_frames:
+                    if speech_frames >= min_speech_frames:
+                        self._emit(buffer, speech_end_at=last_speech_at, utterance_id=utterance_id)
                     buffer = []
                     speech_frames = silence_frames = 0
                     in_speech = False

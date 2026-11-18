@@ -12,6 +12,8 @@ import queue
 import threading
 from typing import Callable
 
+from .audio_capture import partial_indicates_unfinished
+
 import numpy as np
 
 log = logging.getLogger(__name__)
@@ -178,15 +180,15 @@ class LiveDeepgramTranscriber:
     ) -> None:
         del speaker_id, confidence
         text = (text or "").strip()
-        if not text:
+        if not text and not speech_final:
             return
         with self._lock:
-            if segment_final:
+            if text and segment_final:
                 # Deepgram finalizes short segments separately; retain them until the pause ends.
                 if not self._committed or self._committed[-1] != text:
                     self._committed.append(text)
                 self._interim = ""
-            else:
+            elif text:
                 self._interim = text
             display = " ".join(part for part in [*self._committed, self._interim] if part).strip()
             if speech_final:
@@ -204,13 +206,16 @@ class LiveDeepgramTranscriber:
             self._pending_final_text = " ".join(
                 part for part in (self._pending_final_text, final_text) if part
             ).strip()
+        if self._pending_final_text:
             if self._final_flush_task and not self._final_flush_task.done():
                 self._final_flush_task.cancel()
-            self._final_flush_task = asyncio.create_task(self._flush_final_after_pause())
+            continuing = bool(display and not speech_final)
+            delay = 3.0 if continuing or partial_indicates_unfinished(self._pending_final_text) else 1.0
+            self._final_flush_task = asyncio.create_task(self._flush_final_after_pause(delay))
 
-    async def _flush_final_after_pause(self) -> None:
+    async def _flush_final_after_pause(self, delay: float) -> None:
         try:
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(delay)
             with self._lock:
                 final_text = self._pending_final_text.strip()
                 self._pending_final_text = ""
