@@ -37,5 +37,7 @@ class InterviewTurnAndContextTests(unittest.TestCase):
         self.assertFalse(is_coding_question("How does binary search work?"))
         self.assertFalse(is_coding_question("Explain how you classify products."))
         self.assertFalse(is_coding_question("How did you implement retries in your queue?"))
+        self.assertFalse(is_coding_question("How would you implement hybrid search in RAG?"))
+        self.assertTrue(is_coding_question("How would you write a function to merge the lists?"))
         self.assertTrue(is_coding_question("Can you implement binary search?"))
         self.assertTrue(is_coding_question("Given an array, return the longest subarray."))

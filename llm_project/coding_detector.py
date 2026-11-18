@@ -26,7 +26,7 @@ _CODING_SIGNATURE_RE = re.compile(
 
 _PATTERN = re.compile(CODING_KEYWORDS, re.IGNORECASE)
 _CONCEPTUAL = re.compile(
-    r"^(?:what (?:is|are)\b|why\b|how (?:does|do)\b|explain\b|describe\b|compare\b)",
+    r"^(?:what (?:is|are)\b|why\b|how (?:does|do|would|can|should|could)\b|explain\b|describe\b|compare\b)",
     re.IGNORECASE,
 )
 _PAST_IMPLEMENTATION = re.compile(
@@ -35,7 +35,7 @@ _PAST_IMPLEMENTATION = re.compile(
     re.IGNORECASE,
 )
 _IMPLEMENTATION = re.compile(
-    r"\b(?:implement|write (?:a|an|the|some) (?:function|program|solution|code|script)"
+    r"\b(?:write (?:a|an|the|some) (?:function|program|solution|code|script)"
     r"|write code|code up|solve (?:this|the) (?:problem|challenge))\b",
     re.IGNORECASE,
 )
@@ -50,6 +50,8 @@ def is_coding_question(text: str, force: bool = False) -> bool:
         return True
     if _CONCEPTUAL.match(text.strip()):
         return False
+    if re.match(r"^(?:(?:can|could|would) you )?implement\b", text.strip(), re.I):
+        return True
     if len(text.split()) < 3:
         return False
     if _PATTERN.search(text):

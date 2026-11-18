@@ -104,6 +104,8 @@ class InterviewApp:
         self.window.force_coding_requested.connect(self._on_force_coding)
         self.window.scan_screen_requested.connect(self._on_scan_screen)
         self.window.watch_screen_toggled.connect(self._on_watch_toggle)
+        if hasattr(self.window, "refresh_requested"):
+            self.window.refresh_requested.connect(self._on_refresh_answer)
         if hasattr(self.window, "capture_assessment_requested"):
             self.window.capture_assessment_requested.connect(self._on_capture_assessment)
             self.window.submit_assessment_requested.connect(self._on_submit_assessment)
@@ -141,6 +143,22 @@ class InterviewApp:
         else:
             self._force_next_coding = True
             self.window.status_changed.emit("Coding mode armed for next question")
+
+    def _on_refresh_answer(self) -> None:
+        question = self.window.get_last_question().strip()
+        if not question:
+            self.window.status_changed.emit("No question to retry.")
+            return
+        if not self._try_start_work():
+            self.window.status_changed.emit("An answer is already in progress.")
+            return
+        self.executor.submit(self._worker_retry_answer, question, self.window.btn_coding.isChecked())
+
+    def _worker_retry_answer(self, question: str, force_coding: bool) -> None:
+        try:
+            self._generate_for_question(question, force_coding, retry=True)
+        finally:
+            self._finish_work()
 
     def _worker_force_coding(self, question: str) -> None:
         try:
@@ -519,7 +537,7 @@ class InterviewApp:
         self._force_next_coding = False
         self._generate_for_question(question, force)
 
-    def _generate_for_question(self, text: str, force_coding: bool) -> None:
+    def _generate_for_question(self, text: str, force_coding: bool, *, retry: bool = False) -> None:
         generation_started = time.perf_counter()
         first_token_at = None
         active_providers = config.get_active_providers()
@@ -540,7 +558,14 @@ class InterviewApp:
             force_coding = force_coding or text.strip().startswith("[Screen problem]")
             coding = should_use_coding_mode(text, force_coding)
             self.bridge.status.emit(f"Generating {'coding solution' if coding else 'answer'}...")
-            responses = generate_answer(text, self.conversation, force_coding, on_chunk=on_llm_chunk)
+            replace_last = (
+                retry
+                and len(self.conversation) >= 2
+                and self.conversation[-2] == {"role": "user", "content": text}
+                and self.conversation[-1]["role"] == "assistant"
+            )
+            history = self.conversation[:-2] if replace_last else self.conversation
+            responses = generate_answer(text, history, force_coding, on_chunk=on_llm_chunk)
             if isinstance(responses, dict):
                 if not responses:
                     raise RuntimeError("No answer received from the configured LLM providers.")
@@ -554,8 +579,11 @@ class InterviewApp:
             if not answer_text.strip():
                 raise RuntimeError("The LLM provider returned an empty answer.")
             print(f"[latency] llm_total_ms={(time.perf_counter() - generation_started) * 1000:.1f}", flush=True)
-            self.conversation.append({"role": "user", "content": text})
-            self.conversation.append({"role": "assistant", "content": answer_text})
+            if replace_last:
+                self.conversation[-1] = {"role": "assistant", "content": answer_text}
+            else:
+                self.conversation.append({"role": "user", "content": text})
+                self.conversation.append({"role": "assistant", "content": answer_text})
             self.bridge.status.emit("Ready — listening...")
         except Exception as exc:
             self._report_error(exc)

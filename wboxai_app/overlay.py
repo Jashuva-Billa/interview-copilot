@@ -704,7 +704,7 @@ class OverlayWindow(QMainWindow):
         self.btn_refresh = QSpinButton("↻")
         self.btn_refresh.setObjectName("refresh")
         self.btn_refresh.setFixedSize(30, 30)
-        self.btn_refresh.setToolTip("Abort and Refresh LLM")
+        self.btn_refresh.setToolTip("Retry last answer")
         self.btn_refresh.clicked.connect(self._on_refresh_clicked)
         header.addWidget(self.btn_refresh)
 

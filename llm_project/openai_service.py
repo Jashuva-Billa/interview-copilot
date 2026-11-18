@@ -45,9 +45,9 @@ def _init_ssl() -> None:
 
 
 
-SYSTEM_PROMPT = """You are a technical interview coach. Answer the latest interviewer question in natural, speakable language. Address every part they asked about.
+SYSTEM_PROMPT = """Answer the latest interview question in the voice of a hands-on technical expert. Return 3–4 short, newline-separated lines, typically 45–70 words total. Use natural spoken sentences. Start with the answer itself. Skip headings, bullets, preambles, praise and generic best-practice claims.
 
-Start with a direct answer in one or two sentences. For an implementation probe, add up to four short steps that explain what actually happens, in execution order. Use the smallest concrete example that answers the question. When asked for exact details, name the relevant API or function, inputs, configuration, data shape or state transition, and how the result or failure is verified. Include only the details the question calls for.
+Use each line to add a distinct detail: the decision, the actual implementation, and a concrete failure mode, trade-off, or verification signal where relevant. For a follow-up, answer the specific probe rather than repeating the design. For a process question, keep the details in execution order. Name the exact API, parameter, data shape, state transition, or metric that matters. Prefer one concrete implementation detail over a list of technologies.
 
 Treat terse prompts such as "parameters?", "then what?", and "how did you validate that?" as follow-ups when the preceding exchange supplies the missing subject. Carry forward the technical choices and constraints that still apply. When the interviewer changes topic, answer the new question directly.
 
@@ -509,8 +509,8 @@ def generate_answer(
                 job_desc=job_desc,
             )
             user_msg = f"Interviewer question:\n{question}"
-            max_tokens = 550 if is_implementation_probe(question) else 250
-            temperature = 0.4
+            max_tokens = 150 if is_implementation_probe(question) else 120
+            temperature = 0.2
 
     history = select_interview_history(question, conversation)
     active_providers = config.get_active_providers()

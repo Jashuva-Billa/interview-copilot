@@ -37,7 +37,7 @@ class DualAudioRoutingTests(unittest.TestCase):
             self.assertEqual(audio_capture.adaptive_end_silence_ms(9000), 1700)
 
     def test_system_audio_does_not_fall_back_to_working_microphone(self):
-        with patch.object(audio_capture, "_find_loopback_device", return_value=None), patch.object(audio_capture, "_windows_loopback_candidates", return_value=[]), patch.object(
+        with patch.object(audio_capture.sys, "platform", "win32"), patch.object(audio_capture, "_find_loopback_device", return_value=None), patch.object(audio_capture, "_windows_loopback_candidates", return_value=[]), patch.object(
             audio_capture, "_probe_input_device", return_value=True
         ) as probe:
             with self.assertRaisesRegex(RuntimeError, "will not fall back to your microphone"):
@@ -58,6 +58,7 @@ class DualAudioRoutingTests(unittest.TestCase):
     def test_stereo_mix_uses_sounddevice_without_crossing_backend_device_indices(self):
         recorder = audio_capture.SpeechRecorder(on_chunk=lambda _: None, source="system")
         with (
+            patch.object(audio_capture.sys, "platform", "win32"),
             patch.object(audio_capture, "_find_loopback_device", return_value=None),
             patch.object(audio_capture, "_windows_loopback_candidates", return_value=[5]),
             patch.object(audio_capture, "_probe_input_device", return_value=True),
@@ -92,7 +93,7 @@ class DualAudioRoutingTests(unittest.TestCase):
         self.assertEqual(partials[0].utterance_id, "utterance-1")
 
     def test_source_aliases_resolve_to_expected_streams(self):
-        with patch.object(audio_capture, "_find_loopback_device", return_value=(7, "Loopback input")), patch.object(
+        with patch.object(audio_capture.sys, "platform", "win32"), patch.object(audio_capture, "_find_loopback_device", return_value=(7, "Loopback input")), patch.object(
             audio_capture, "_device_name", return_value="Loopback input"
         ):
             self.assertEqual(audio_capture.resolve_input_device("system"), audio_capture.InputDevice(7, "Loopback input", system_audio=True, wasapi=True))
