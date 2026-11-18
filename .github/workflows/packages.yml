@@ -21,7 +21,7 @@ jobs:
         include:
           - runner: windows-latest
             file: Interview-Copilot.exe
-          - runner: macos-15
+          - runner: macos-26
             file: Interview-Copilot.dmg
     runs-on: ${{ matrix.runner }}
     steps:

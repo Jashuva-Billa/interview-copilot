@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [windows-latest, macos-15]
+        platform: [windows-latest, macos-26]
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 12
     steps:
