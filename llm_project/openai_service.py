@@ -533,6 +533,14 @@ def generate_answer(
         openai_messages.append(turn)
     openai_messages.append({"role": "user", "content": user_msg})
 
+    def parse_complete(text: str) -> ParsedResponse:
+        if not coding and not is_screen_scan and text.count("\n") < 2:
+            # Keep complete thoughts readable without cutting the model's answer.
+            parts = re.split(r"(?<=[.!?])\s+(?=[A-Z])", text.strip(), maxsplit=3)
+            if len(parts) >= 3:
+                text = "\n".join(parts)
+        return parse_structured_response(text, coding)
+
     def run_openai():
         try:
             print("[openai_service] OpenAI call started...", flush=True)
@@ -588,7 +596,7 @@ def generate_answer(
                     parsed = parse_structured_response(accumulated_text, coding)
                     on_chunk("openai", parsed)
 
-            final_responses["openai"] = parse_structured_response(accumulated_text, coding)
+            final_responses["openai"] = parse_complete(accumulated_text)
             from token_tracker import tracker_instance
             tracker_instance.record_llm_call("openai", model_name, system + "\n" + user_msg, final_responses["openai"].full_text)
             print("[openai_service] OpenAI completed streaming.", flush=True)
@@ -662,7 +670,7 @@ def generate_answer(
                         except Exception:
                             pass
 
-            final_responses["gemini"] = parse_structured_response(accumulated_text, coding)
+            final_responses["gemini"] = parse_complete(accumulated_text)
             from token_tracker import tracker_instance
             tracker_instance.record_llm_call("gemini", config.GEMINI_MODEL, system + "\n" + user_msg, final_responses["gemini"].full_text)
             print("[openai_service] Gemini completed streaming.", flush=True)
@@ -735,7 +743,7 @@ def generate_answer(
                         except Exception:
                             pass
 
-            final_responses["claude"] = parse_structured_response(accumulated_text, coding)
+            final_responses["claude"] = parse_complete(accumulated_text)
             from token_tracker import tracker_instance
             tracker_instance.record_llm_call("claude", config.CLAUDE_MODEL, system + "\n" + user_msg, final_responses["claude"].full_text)
             print("[openai_service] Claude completed streaming.", flush=True)

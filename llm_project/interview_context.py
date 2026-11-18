@@ -27,6 +27,8 @@ _SHORT_PROBE = re.compile(
     r"^(?:(?:what (?:about|were|are) )?(?:the )?(?:parameters?|payload|schema|"
     r"configuration|thresholds?|fallbacks?|retr(?:y|ies)|timeouts?|"
     r"latency|cost|trade.off[s]?|inputs?|outputs?)|"
+    r"what (?:exact |specific )?(?:parameters?|headers?|fields?|payload|settings?) "
+    r"did you (?:send|use|pass|set)|"
     r"(?:and )?then what|what happens next|how (?:exactly|so)|"
     r"how did you (?:implement|test|validate|measure) (?:it|this|that))[?.!]*$",
     re.IGNORECASE,

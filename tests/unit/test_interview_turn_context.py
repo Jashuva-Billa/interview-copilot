@@ -32,6 +32,7 @@ class InterviewTurnAndContextTests(unittest.TestCase):
         self.assertEqual(select_interview_history("How did Milvus handle filters?", history), history[:2])
         self.assertEqual(select_interview_history("Could you elaborate on that approach?", history), history)
         self.assertEqual(select_interview_history("What is polymorphism?", history), [])
+        self.assertEqual(select_interview_history("What exact parameters did you send?", history), history)
 
     def test_conceptual_question_and_implementation_take_different_routes(self):
         self.assertFalse(is_coding_question("How does binary search work?"))
