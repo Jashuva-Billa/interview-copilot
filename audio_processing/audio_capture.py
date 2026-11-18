@@ -41,10 +41,6 @@ class AudioChunk:
     is_partial: bool = False
 
 
-def list_audio_devices() -> None:
-    print(sd.query_devices())
-
-
 def _device_name(device_id: Optional[int]) -> str:
     if device_id is None:
         return "default microphone"

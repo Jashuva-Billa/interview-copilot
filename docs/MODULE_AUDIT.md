@@ -40,7 +40,7 @@ This inventory records why files exist before moving or deleting them. It reflec
 ### LLM and response processing
 
 - llm_project/openai_service.py: current Windows runner's multi-provider generation/transcription/vision service.
-- llm_project/interview_prompt.py and coding_detector.py: prompt construction and coding-question detection used by that service.
+- llm_project/coding_detector.py determines the coding route. Prompt templates live in openai_service.py, which uses interview_context.py to select prior exchanges.
 - llm_project/response_parser.py: structured output parsing used by the Windows runtime.
 - llm_project/pdf_loader.py: called from the generation path for supplemental PDF context; test it or remove the feature and reference together.
 

@@ -25,15 +25,6 @@ _ssl_bootstrapped = False
 _use_local_fallback_directly = getattr(config, "USE_LOCAL_LLM", False)
 
 
-def close_client() -> None:
-    """Close active HTTP connections during application shutdown."""
-    global _client_instance
-    client = _client_instance
-    _client_instance = None
-    if client is not None:
-        client.close()
-
-
 def _init_ssl() -> None:
     """Use OS trust store on Windows (fixes CERTIFICATE_VERIFY_FAILED)."""
     global _ssl_bootstrapped
@@ -343,46 +334,6 @@ def should_use_coding_mode(question: str, force_coding: bool = False) -> bool:
     if config.CODING_MODE == "auto":
         return is_coding_question(question)
     return False
-
-
-def is_question_linked(question: str, conversation: list[dict]) -> bool:
-    """Check if the new question is contextually linked to the previous conversation turns."""
-    if not conversation:
-        return False
-
-    # Extract last 3 turns to keep context analysis concise
-    recent_turns = conversation[-3:]
-    formatted_history = ""
-    for turn in recent_turns:
-        role = "Candidate" if turn["role"] == "assistant" else "Interviewer"
-        formatted_history += f"{role}: {turn['content']}\n"
-
-    prompt = (
-        "You are an assistant analyzing a job interview dialogue.\n"
-        "Determine if the NEW QUESTION is contextually linked, related, or a follow-up to the PREVIOUS CONVERSATION.\n"
-        "Examples of linked questions: asking to optimize, clarify, or explain the previous answer; asking about complexity/trade-offs of the previous code; continuing the same discussion.\n"
-        "Examples of NOT linked questions: starting a completely new topic; introducing a new coding problem; shifting to a different part of the interview.\n\n"
-        "PREVIOUS CONVERSATION:\n"
-        f"{formatted_history}\n"
-        "NEW QUESTION:\n"
-        f"{question}\n\n"
-        "Reply with ONLY 'YES' or 'NO'."
-    )
-
-    try:
-        client = _client()
-        response = client.chat.completions.create(
-            model=config.OPENAI_CHAT_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=5,
-        )
-        answer = response.choices[0].message.content.strip().upper()
-        print(f"[openai_service] Context linkage check result: {answer}", flush=True)
-        return "YES" in answer
-    except Exception as e:
-        print(f"[openai_service] Error checking context linkage: {e}", flush=True)
-        return True
 
 
 @lru_cache(maxsize=1)

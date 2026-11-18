@@ -76,7 +76,6 @@ class InterviewApp:
         self._assessment_images: list[bytes] = []
         self._live_system_stt = None
         self._streaming_stt_active = False
-        self.recorder: SpeechRecorder | None = None
         self.system_recorder: SpeechRecorder | None = None
         self.mic_recorder: SpeechRecorder | None = None
         self.candidate_transcripts: list[str] = []
@@ -333,7 +332,6 @@ class InterviewApp:
                 stream_only=self._streaming_stt_active,
             )
             self.system_recorder.start()
-            self.recorder = self.system_recorder
         except Exception as exc:
             for recorder in (self.mic_recorder, self.system_recorder):
                 if recorder is not None:
@@ -345,7 +343,7 @@ class InterviewApp:
                 self._live_system_stt.stop()
             self._live_system_stt = None
             self._streaming_stt_active = False
-            self.recorder = self.system_recorder = self.mic_recorder = None
+            self.system_recorder = self.mic_recorder = None
             self.bridge.error.emit(format_api_error(exc))
             self.window.set_listening_state(False)
             return
@@ -433,7 +431,7 @@ class InterviewApp:
             self._live_system_stt.stop()
         self._live_system_stt = None
         self._streaming_stt_active = False
-        self.recorder = self.system_recorder = self.mic_recorder = None
+        self.system_recorder = self.mic_recorder = None
         self.window.status_changed.emit("Stopped listening (system audio + microphone)")
 
     def _worker_process_partial_audio(self, chunk: AudioChunk) -> None:
@@ -558,8 +556,8 @@ class InterviewApp:
         msg = f"Ready ({plat})"
         if config.openai_key_configured():
             msg += " · API key OK"
-            ssl_ok, ssl_note = check_ssl_connectivity()
-            msg += f" · {ssl_note}" if ssl_ok else f" · {ssl_note}"
+            _, ssl_note = check_ssl_connectivity()
+            msg += f" · {ssl_note}"
         else:
             msg += " · set OPENAI_API_KEY in interview-copilot/.env"
         if config.use_transparent_overlay():
