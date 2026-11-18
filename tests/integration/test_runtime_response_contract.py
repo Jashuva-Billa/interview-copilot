@@ -79,6 +79,36 @@ class TestRuntimeResponseContract(unittest.TestCase):
             runner.window.btn_assessment.setChecked(False)
             runner.window.btn_coding.setChecked(False)
 
+    def test_implementation_probe_sends_context_and_step_by_step_instructions(self):
+        import openai_service
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        create = Mock(return_value=[SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="Validate the payload first."))]
+        )])
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        history = [
+            {"role": "user", "content": "How do you send a request to the resume API?"},
+            {"role": "assistant", "content": "Use an HTTPS request to the ATS."},
+        ]
+        with (
+            patch.object(openai_service, "_client", return_value=client),
+            patch.object(openai_service.config, "get_active_providers", return_value=["openai"]),
+            patch.dict(sys.modules, {"token_tracker": SimpleNamespace(tracker_instance=Mock())}),
+        ):
+            result = openai_service.generate_answer("Parameters?", history)
+            probe_request = create.call_args.kwargs
+            openai_service.generate_answer("What is polymorphism?", history)
+            general_request = create.call_args.kwargs
+
+        self.assertEqual(result["openai"].full_text, "Validate the payload first.")
+        self.assertEqual(probe_request["messages"][1:-1], history)
+        self.assertIn("execution order", probe_request["messages"][0]["content"])
+        self.assertIn("do not verify experience", probe_request["messages"][0]["content"])
+        self.assertGreater(probe_request["max_tokens"], general_request["max_tokens"])
+        self.assertEqual(len(general_request["messages"]), 2)
+
     def test_screenshot_response_is_wrapped_for_overlay(self):
         expected = ParsedResponse(
             is_coding=True,

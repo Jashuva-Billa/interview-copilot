@@ -36,5 +36,6 @@ class InterviewTurnAndContextTests(unittest.TestCase):
     def test_conceptual_question_and_implementation_take_different_routes(self):
         self.assertFalse(is_coding_question("How does binary search work?"))
         self.assertFalse(is_coding_question("Explain how you classify products."))
+        self.assertFalse(is_coding_question("How did you implement retries in your queue?"))
         self.assertTrue(is_coding_question("Can you implement binary search?"))
         self.assertTrue(is_coding_question("Given an array, return the longest subarray."))

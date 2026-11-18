@@ -16,6 +16,26 @@ _FOLLOW_UP = re.compile(
     re.IGNORECASE,
 )
 
+_PROBE = re.compile(
+    r"\b(?:exact(?:ly)?|step.by.step|under the hood|internally|in detail|"
+    r"implementation|parameters?|payload|schema|config(?:uration)?|thresholds?|"
+    r"retr(?:y|ies)|timeouts?|fallbacks?|edge cases?|(?:validate|verify|measure)|"
+    r"how did you (?:build|implement|handle|test|deploy|store|configure|choose))\b",
+    re.IGNORECASE,
+)
+_SHORT_PROBE = re.compile(
+    r"^(?:(?:what (?:about|were|are) )?(?:the )?(?:parameters?|payload|schema|"
+    r"configuration|thresholds?|fallbacks?|retr(?:y|ies)|timeouts?|"
+    r"latency|cost|trade.off[s]?|inputs?|outputs?)|"
+    r"(?:and )?then what|what happens next|how (?:exactly|so)|"
+    r"how did you (?:implement|test|validate|measure) (?:it|this|that))[?.!]*$",
+    re.IGNORECASE,
+)
+
+
+def is_implementation_probe(question: str) -> bool:
+    return bool(_PROBE.search(question) or _SHORT_PROBE.fullmatch(question.strip()))
+
 
 def _terms(text: str) -> set[str]:
     return set(_WORD.findall(text.casefold())) - _STOP_WORDS
@@ -33,7 +53,7 @@ def select_interview_history(question: str, conversation: list[dict]) -> list[di
     ]
     terms = _terms(question)
     selected = set()
-    if _FOLLOW_UP.search(question.strip()):
+    if _FOLLOW_UP.search(question.strip()) or _SHORT_PROBE.fullmatch(question.strip()):
         selected.update(range(max(0, len(exchanges) - 2), len(exchanges)))
     ranked = []
     for index, (user, answer) in enumerate(exchanges):

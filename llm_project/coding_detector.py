@@ -29,6 +29,11 @@ _CONCEPTUAL = re.compile(
     r"^(?:what (?:is|are)\b|why\b|how (?:does|do)\b|explain\b|describe\b|compare\b)",
     re.IGNORECASE,
 )
+_PAST_IMPLEMENTATION = re.compile(
+    r"\b(?:how|why|where|when|what)\b[^?.!]*\b(?:did you|did your team|have you|"
+    r"you implemented|you built)\b",
+    re.IGNORECASE,
+)
 _IMPLEMENTATION = re.compile(
     r"\b(?:implement|write (?:a|an|the|some) (?:function|program|solution|code|script)"
     r"|write code|code up|solve (?:this|the) (?:problem|challenge))\b",
@@ -39,6 +44,8 @@ _IMPLEMENTATION = re.compile(
 def is_coding_question(text: str, force: bool = False) -> bool:
     if force:
         return True
+    if _PAST_IMPLEMENTATION.search(text):
+        return False
     if _CODING_SIGNATURE_RE.search(text) or _IMPLEMENTATION.search(text):
         return True
     if _CONCEPTUAL.match(text.strip()):
