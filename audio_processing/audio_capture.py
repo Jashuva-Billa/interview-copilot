@@ -134,6 +134,7 @@ class WasapiLoopbackStream:
             input_device_index=self.device_index,
             frames_per_buffer=self.native_blocksize,
             stream_callback=py_callback,
+            start=False,
         )
         self.stream.start_stream()
 
@@ -331,21 +332,30 @@ class SpeechRecorder:
         self._device, self._loopback, self._device_label = device.index, device.system_audio, device.label
         self._vad = EnergyVAD(loopback=self._loopback)
 
+        pending = np.empty(0, dtype=np.float32)
+
         def callback(indata, _frames, _time, status):
+            nonlocal pending
             if status:
                 self.on_status(f"Audio: {status}")
-            mono = indata[:, 0] if indata.ndim > 1 else indata.flatten()
-            try:
-                self._queue.put_nowait(mono.copy())
-            except queue.Full:
+            mono = indata[:, 0] if indata.ndim > 1 else indata
+            if pending.size:
+                mono = np.concatenate((pending, mono))
+            complete = mono.size - mono.size % FRAME_SAMPLES
+            pending = mono[complete:].copy()
+            for offset in range(0, complete, FRAME_SAMPLES):
+                frame = mono[offset:offset + FRAME_SAMPLES].copy()
                 try:
-                    self._queue.get_nowait()
-                except queue.Empty:
-                    pass
-                try:
-                    self._queue.put_nowait(mono.copy())
+                    self._queue.put_nowait(frame)
                 except queue.Full:
-                    pass
+                    try:
+                        self._queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    try:
+                        self._queue.put_nowait(frame)
+                    except queue.Full:
+                        pass
 
         kwargs = dict(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
                       blocksize=FRAME_SAMPLES, latency="low", callback=callback)

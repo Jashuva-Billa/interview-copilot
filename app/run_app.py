@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+_WINDOWS_PACKAGE_TEST = sys.platform == "win32" and "--package-e2e-test" in sys.argv
+if _WINDOWS_PACKAGE_TEST:
+    profile = os.environ.get("COPILOT_PACKAGE_TEST_PROFILE")
+    if not profile:
+        sys.exit(2)
+    os.environ["LOCALAPPDATA"] = profile
 
 # ── configure import paths ────────────────────────────────────────────────────
 _ROOT = Path(__file__).resolve().parents[1]
@@ -52,7 +60,13 @@ def main() -> int:
 
     qt_app = QApplication(sys.argv)
     qt_app.setApplicationName("Interview Copilot")
+    if _WINDOWS_PACKAGE_TEST:
+        from app.windows_package_smoke import run
+
+        return run(AppRunner)
     if "--package-smoke-test" in sys.argv:
+        if "--expect-saved-key" in sys.argv and not config.openai_key_configured():
+            return 3
         runner = AppRunner()
         runner.window.close()
         return 0

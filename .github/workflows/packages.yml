@@ -35,17 +35,37 @@ jobs:
           swiftc -target arm64-apple-macos14.0 -parse-as-library packaging/macos_audio.swift -o "$RUNNER_TEMP/interview-copilot-audio"
           echo "COPILOT_MAC_AUDIO_HELPER=$RUNNER_TEMP/interview-copilot-audio" >> "$GITHUB_ENV"
       - run: python -m PyInstaller --clean --noconfirm --distpath "${{ runner.temp }}/copilot-dist" --workpath "${{ runner.temp }}/copilot-build" packaging/main.spec
-      - if: runner.os == 'Windows'
+      - name: Test the packaged Windows executable
+        if: runner.os == 'Windows'
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          $app = Start-Process -FilePath "$env:RUNNER_TEMP/copilot-dist/Interview-Copilot.exe" -ArgumentList "--package-smoke-test" -PassThru
-          if (-not $app.WaitForExit(60000)) {
-            $app.Kill()
-            throw "The Windows package did not start within 60 seconds"
+          $folder = Join-Path $env:RUNNER_TEMP ("Copilot Release " + [char]0x03A9 + " " + [guid]::NewGuid())
+          New-Item -ItemType Directory -Path $folder | Out-Null
+          $env:COPILOT_PACKAGE_TEST_PROFILE = Join-Path $folder "Clean Profile"
+          $exe = Join-Path $folder "Interview-Copilot.exe"
+          Copy-Item "$env:RUNNER_TEMP/copilot-dist/Interview-Copilot.exe" $exe
+          try {
+            $app = Start-Process -FilePath $exe -WorkingDirectory $folder -ArgumentList "--package-e2e-test" -PassThru
+            if (-not $app.WaitForExit(120000)) {
+              Stop-Process -Id $app.Id -Force
+              throw "Windows package regression timed out"
+            }
+            $report = Join-Path $env:COPILOT_PACKAGE_TEST_PROFILE "Interview Copilot/package-smoke.log"
+            if (Test-Path $report) { Get-Content -Encoding utf8 $report }
+            if ($app.ExitCode -ne 0) { throw "Windows package regression exited with code $($app.ExitCode)" }
+            if (-not (Test-Path $report)) { throw "Missing Windows package regression report" }
+            $env:LOCALAPPDATA = $env:COPILOT_PACKAGE_TEST_PROFILE
+            $relaunch = Start-Process -FilePath $exe -WorkingDirectory $folder -ArgumentList "--package-smoke-test", "--expect-saved-key" -PassThru
+            if (-not $relaunch.WaitForExit(60000)) {
+              Stop-Process -Id $relaunch.Id -Force
+              throw "Windows package relaunch timed out"
+            }
+            if ($relaunch.ExitCode -ne 0) { throw "Windows package relaunch failed" }
+          } finally {
+            Remove-Item -LiteralPath $folder -Recurse -Force
           }
-          if ($app.ExitCode -ne 0) { exit $app.ExitCode }
       - if: runner.os == 'macOS'
         env:
           QT_QPA_PLATFORM: offscreen
