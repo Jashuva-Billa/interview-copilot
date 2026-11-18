@@ -2,7 +2,16 @@
 
 A local desktop interview assistant for GenAI, machine learning, AI engineering, and coding interviews. It captures interviewer audio, transcribes questions, sends the completed question to a configured model API, and displays a concise answer in a floating PyQt overlay. It can also analyze a screenshot for coding or assessment tasks.
 
-> **Important:** This application uses model APIs directly. It does **not** automate ChatGPT in a browser and does not send questions through the ChatGPT website. For OpenAI, it uses the OpenAI API with an API key from this project's local `.env`.
+> **Important:** This application uses model APIs directly. It does **not** automate ChatGPT in a browser and does not send questions through the ChatGPT website. For OpenAI, it uses the OpenAI API with an API key from the saved application settings.
+
+## Install
+
+- **Windows x64** — Open `Interview-Copilot.exe`.
+- **Apple Silicon Mac, macOS 13 or later** — Open `Interview-Copilot.dmg`, drag Interview Copilot to Applications, and launch it. Allow access to the microphone and Screen & System Audio Recording when prompted.
+
+Enter an OpenAI API key the first time. The app stores it in your per-user app data and reuses it at later launches. A confirmed credit exhaustion error offers key replacement. Temporary rate limits and network errors do not open setup.
+
+Native packages are produced by the **Build desktop packages** workflow. Tagged releases publish both files as release downloads.
 
 ## Windows audio setup
 
@@ -12,7 +21,7 @@ Run Interview Copilot on the same Windows PC as your meeting. Set Meet or your o
 
 - **Technical and behavioral Q&A.** Start listening to capture interviewer audio. Follow-ups use recent exchanges, and questions that revisit a topic can pull in an older matching exchange. The candidate microphone is recorded separately and does not trigger answers.
 - **Coding.** Spoken implementation requests use the coding prompt. Use **Scan screen** for a visible coding problem or a single multiple-choice question.
-- **Multi-screen coding assessments (Windows).** Enable **Assessment**, capture the relevant problem and code screens, then click **Submit**. Screens stay queued for retry until you click **Clear**.
+- **Multi-screen coding assessments.** Enable **Assessment**, capture the relevant problem and code screens, then click **Submit**. Screens stay queued for retry until you click **Clear**.
 
 The audio pipeline waits longer when a transcript ends mid-clause. It filters common filler and transcription noise markers, and suppresses immediate duplicate finals.
 
@@ -53,49 +62,9 @@ OpenAI API      Gemini API      Anthropic API
 ```
 
 The exact providers used depend on keys and settings in `.env`. OpenAI is enabled when `OPENAI_API_KEY` is configured (or local-LLM mode is enabled); Gemini and Claude are enabled when their respective API keys are configured. The app can run multiple configured providers and displays the primary configured provider's answer.
-
-## Current runtime entry points
-
-### Windows
-
-Double-click `start_interview_copilot.bat`. It launches `app/run_app.py` using `venv\\Scripts\\pythonw.exe` so the UI runs without an attached console. The runner bootstraps the project-root `.env`, constructs `InterviewApp`, and starts the overlay.
-
-The Windows runner deliberately adds `wboxai_app/`, `llm_project/`, and `audio_processing/` to the import path. Consequently, Windows currently uses the Windows-oriented configuration/UI and multi-provider LLM implementation from `wboxai_app/` and `llm_project/`, plus audio modules from `audio_processing/`. The root `app/services/` and `app/ui/` modules are alternate/migrated implementations, not yet a single unified runtime.
-
-### macOS / direct app entry
-
-`scripts/run.sh` prepares the project virtual environment and root `.env`, then runs `app/main.py`. That path uses the moved modules under `app/core/`, `app/services/`, `app/ui/`, and `app/screen/`. Keep platform-specific differences in mind when changing shared behavior.
-
-## API usage: ChatGPT website vs OpenAI API
-
-- **OpenAI answer generation:** direct HTTPS/API calls through the official Python `openai` SDK to OpenAI's API, using `OPENAI_API_KEY` and `OPENAI_CHAT_MODEL`.
-- **OpenAI audio transcription fallback:** direct OpenAI API transcription requests using `OPENAI_TRANSCRIBE_MODEL`.
-- **OpenAI screenshot analysis:** direct OpenAI API vision/chat-completion requests using `OPENAI_VISION_MODEL`.
-- **Live streaming transcription:** when `DEEPGRAM_API_KEY` is available and streaming mode is selected/available, audio is streamed to Deepgram over a WebSocket. This is not ChatGPT web audio capture.
-- **Optional other answer providers:** Gemini uses its API with `GEMINI_API_KEY`; Claude uses Anthropic's API with `CLAUDE_API_KEY` (or `ANTHROPIC_API_KEY`).
-- **No ChatGPT browser automation:** there is no ChatGPT web login/session flow in the current launcher. No ChatGPT website cookies or browser session are used to generate answers.
-
-API usage may incur provider charges and is governed by the relevant provider account, API pricing, and data policies. Do not put API keys in source control or share them in screenshots/logs.
-
-## Setup
-
-1. Install Python 3.10+ and Git if needed.
-2. From the repository root, create the virtual environment:
-   ```powershell
-   python -m venv venv
-   .\\venv\\Scripts\\python.exe -m pip install --upgrade pip
-   .\\venv\\Scripts\\python.exe -m pip install -r requirements.txt
-   ```
-3. Copy `.env.example` to `.env` if it exists; otherwise create `.env` in the repository root.
-4. Add at least `OPENAI_API_KEY` for OpenAI responses and transcription fallback. For streaming transcription, also configure `DEEPGRAM_API_KEY`.
-5. Add your resume/context to the configured local resume file (default: `local_data/resume_context.txt`). This local context should remain untracked.
-6. Launch `start_interview_copilot.bat`.
-
-For macOS, run `./scripts/run.sh` after configuring the local `.env`.
-
 ## Key configuration
 
-All runtime configuration should be in the repository-root `.env`; never commit it.
+Packaged installations store settings in the user's app data folder. Source development reads the repository-root `.env`.
 
 | Variable | Purpose |
 | --- | --- |
@@ -147,7 +116,6 @@ interview-copilot/
   docs/ARCHITECTURE.md      # architecture and refactoring notes
   local_data/               # local resume/context data (keep private)
   requirements.txt
-  start_interview_copilot.bat
 ```
 
 ## Testing

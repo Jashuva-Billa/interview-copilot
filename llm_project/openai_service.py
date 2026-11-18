@@ -12,6 +12,7 @@ import numpy as np
 from openai import APIConnectionError, OpenAI
 
 import config
+from llm_project.provider_credits import CreditsExhausted, check_http_credits, openai_credits_exhausted
 from llm_project.coding_detector import is_coding_question
 from llm_project.response_parser import (
     ParsedResponse,
@@ -21,6 +22,7 @@ from llm_project.response_parser import (
 )
 
 _client_instance: OpenAI | None = None
+_client_key = ""
 _ssl_bootstrapped = False
 _use_local_fallback_directly = getattr(config, "USE_LOCAL_LLM", False)
 
@@ -247,8 +249,7 @@ def format_api_error(exc: Exception) -> str:
     text = str(exc).lower()
     if "certificate verify failed" in text or "ssl" in text:
         return (
-            "SSL certificate error — launch from interview-copilot with start_interview_copilot.bat, "
-            "then: pip install certifi. Or set SSL_VERIFY=false in .env (last resort)."
+            "SSL certificate verification failed. Check your computer’s trust settings or corporate proxy."
         )
     if isinstance(exc, APIConnectionError):
         return f"Cannot reach OpenAI — check internet/VPN. ({exc})"
@@ -283,9 +284,9 @@ def check_ssl_connectivity() -> tuple[bool, str]:
 
 
 def _client() -> OpenAI:
-    global _client_instance
+    global _client_instance, _client_key
     _init_ssl()
-    if _client_instance is not None:
+    if _client_instance is not None and _client_key == config.OPENAI_API_KEY:
         return _client_instance
     if not config.openai_key_configured():
         raise ValueError(
@@ -297,6 +298,7 @@ def _client() -> OpenAI:
         api_key=config.OPENAI_API_KEY,
         http_client=http_client,
     )
+    _client_key = config.OPENAI_API_KEY
     return _client_instance
 
 
@@ -513,6 +515,7 @@ def generate_answer(
     history = select_interview_history(question, conversation)
     active_providers = config.get_active_providers()
     final_responses = {}
+    credit_errors = {}
     threads = []
 
     openai_messages = [{"role": "system", "content": system}]
@@ -580,6 +583,9 @@ def generate_answer(
             tracker_instance.record_llm_call("openai", model_name, system + "\n" + user_msg, final_responses["openai"].full_text)
             print("[openai_service] OpenAI completed streaming.", flush=True)
         except Exception as e:
+            if openai_credits_exhausted(e):
+                credit_errors["openai"] = CreditsExhausted("openai")
+                return
             print(f"[openai_service] OpenAI error: {e}", flush=True)
             err_msg = f"Error calling OpenAI: {e}"
             parsed = parse_structured_response(err_msg, coding)
@@ -620,6 +626,7 @@ def generate_answer(
             accumulated_text = ""
             with httpx.stream("POST", url, json=body, timeout=20.0) as response:
                 if response.status_code != 200:
+                    check_http_credits("gemini", response.status_code, response.read().decode(errors="replace"))
                     raise RuntimeError(f"API returned status code {response.status_code}")
                 
                 for line in response.iter_lines():
@@ -649,6 +656,8 @@ def generate_answer(
             from token_tracker import tracker_instance
             tracker_instance.record_llm_call("gemini", config.GEMINI_MODEL, system + "\n" + user_msg, final_responses["gemini"].full_text)
             print("[openai_service] Gemini completed streaming.", flush=True)
+        except CreditsExhausted as exc:
+            credit_errors["gemini"] = exc
         except Exception as e:
             print(f"[openai_service] Gemini error: {e}", flush=True)
             err_msg = f"Error calling Gemini: {e}"
@@ -693,6 +702,7 @@ def generate_answer(
             accumulated_text = ""
             with httpx.stream("POST", url, headers=headers, json=body, timeout=20.0) as response:
                 if response.status_code != 200:
+                    check_http_credits("claude", response.status_code, response.read().decode(errors="replace"))
                     raise RuntimeError(f"API returned status code {response.status_code}")
                 
                 for line in response.iter_lines():
@@ -719,6 +729,8 @@ def generate_answer(
             from token_tracker import tracker_instance
             tracker_instance.record_llm_call("claude", config.CLAUDE_MODEL, system + "\n" + user_msg, final_responses["claude"].full_text)
             print("[openai_service] Claude completed streaming.", flush=True)
+        except CreditsExhausted as exc:
+            credit_errors["claude"] = exc
         except Exception as e:
             print(f"[openai_service] Claude error: {e}", flush=True)
             err_msg = f"Error calling Claude: {e}"
@@ -749,6 +761,8 @@ def generate_answer(
             break
         time.sleep(0.02)
 
+    if credit_errors and not final_responses:
+        raise next(iter(credit_errors.values()))
     return final_responses
 
 
@@ -835,6 +849,8 @@ def solve_from_screenshot(
         success = True
         print("[openai_service] Vision model call completed successfully.", flush=True)
     except Exception as exc:
+        if openai_credits_exhausted(exc):
+            raise CreditsExhausted("openai") from exc
         print(f"[openai_service] Vision model call failed (switching to local OCR fallback): {exc}", flush=True)
 
     if not success or (is_cancelled and is_cancelled()):
@@ -1057,6 +1073,8 @@ def solve_assessment_multi_image(
         return "Multi-screenshot assessment completed.", final_parsed
 
     except Exception as exc:
+        if openai_credits_exhausted(exc):
+            raise CreditsExhausted("openai") from exc
         print(f"[openai_service] Multi-image vision assessment call failed: {exc}", flush=True)
         err_parsed = ParsedResponse(
             is_coding=True,

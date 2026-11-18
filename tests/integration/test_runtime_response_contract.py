@@ -52,6 +52,37 @@ class TestRuntimeResponseContract(unittest.TestCase):
         self.assertEqual(exit_error.exception.code, 1)
         self.assertIn("Missing .env", show_error.call_args.args[2])
 
+    def test_first_launch_saves_key_and_later_launch_skips_dialog(self):
+        from app import credentials
+
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            patch.object(credentials.config, "OPENAI_API_KEY", ""),
+            patch.object(run_app, "QApplication", return_value=self.runner.app),
+            patch.object(run_app.AppRunner, "run", return_value=0),
+            patch.object(credentials.QInputDialog, "getText", return_value=("sk-setup-test", True)) as prompt,
+        ):
+            settings = Path(folder) / ".env"
+            with patch.object(credentials.config, "env_file_path", return_value=settings):
+                self.assertEqual(run_app.main(), 0)
+                self.assertEqual(run_app.main(), 0)
+            self.assertIn("sk-setup-test", settings.read_text(encoding="utf-8"))
+            prompt.assert_called_once()
+
+    def test_only_explicit_credit_errors_request_key_replacement(self):
+        from llm_project.provider_credits import CreditsExhausted
+
+        rate_limit = RuntimeError("Too many requests")
+        rate_limit.code = "rate_limit_exceeded"
+        with patch("app.credentials.configure_key") as configure:
+            try:
+                self.runner._report_error(rate_limit)
+                configure.assert_not_called()
+                self.runner._report_error(CreditsExhausted("openai"))
+                configure.assert_called_once_with("openai", self.runner.window, exhausted=True)
+            finally:
+                self.runner.app.processEvents()
+
     def test_assessment_buttons_capture_submit_and_clear(self):
         from openai_service import ParsedResponse
 

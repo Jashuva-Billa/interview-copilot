@@ -12,7 +12,9 @@ from dotenv import dotenv_values
 FROZEN = getattr(sys, "frozen", False)
 
 if FROZEN:
-    ROOT = Path(sys.executable).resolve().parent
+    from app.core.project_bootstrap import user_data_path
+
+    ROOT = user_data_path()
 else:
     ROOT = Path(__file__).resolve().parent
 
@@ -39,12 +41,9 @@ def _env_bool(name: str, default: str = "true") -> bool:
     return _env(name, default).lower() in ("1", "true", "yes")
 
 
-if sys.platform != "win32":
-    raise SystemExit("Error: WboxAI is designed and supported exclusively for Windows (10/11).")
-
-IS_WINDOWS = True
-IS_MAC = False
-PLATFORM_NAME = "Windows"
+IS_WINDOWS = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
+PLATFORM_NAME = "macOS" if IS_MAC else "Windows" if IS_WINDOWS else sys.platform
 
 OPENAI_API_KEY = _env("OPENAI_API_KEY")
 OPENAI_TRANSCRIBE_MODEL = _env("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")

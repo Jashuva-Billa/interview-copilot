@@ -8,17 +8,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class LaunchContractTests(unittest.TestCase):
-    def test_windows_launcher_uses_current_runner(self):
-        launcher = (ROOT / "start_interview_copilot.bat").read_text(encoding="utf-8")
-        self.assertIn('"%~dp0app\\run_app.py"', launcher)
-        self.assertIn("pythonw.exe", launcher)
-        self.assertNotIn("run_setup", launcher.lower())
-
-    def test_macos_launcher_uses_project_venv_and_env(self):
-        launcher = (ROOT / "scripts" / "run.sh").read_text(encoding="utf-8")
-        self.assertIn('"$ROOT/venv/bin/python"', launcher)
-        self.assertIn('"$ROOT/.env"', launcher)
-        self.assertIn('"$ROOT/app/main.py"', launcher)
+    def test_native_packages_use_one_app_entry_point(self):
+        spec = (ROOT / "packaging/main.spec").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/packages.yml").read_text(encoding="utf-8")
+        self.assertIn('"app/run_app.py"', spec)
+        self.assertIn("Interview Copilot.app", spec)
+        self.assertIn("Interview-Copilot.exe", workflow)
+        self.assertIn("Interview-Copilot.dmg", workflow)
+        self.assertFalse((ROOT / "start_interview_copilot.bat").exists())
+        self.assertFalse((ROOT / "scripts/run.sh").exists())
 
     def test_moved_modules_exist_and_application_sources_are_not_at_root(self):
         expected = (
@@ -58,7 +56,7 @@ class LaunchContractTests(unittest.TestCase):
     def test_standalone_setup_runner_stays_removed(self):
         self.assertFalse((ROOT / "run_setup.bat").exists())
         self.assertFalse((ROOT / "run_setup.py").exists())
-        for path in (ROOT / "README.md", ROOT / "wboxai_app" / "README.md", ROOT / "start_interview_copilot.bat"):
+        for path in (ROOT / "README.md", ROOT / "wboxai_app" / "README.md"):
             self.assertNotIn("run_setup", path.read_text(encoding="utf-8").lower())
 
     def test_logout_control_stays_removed_from_active_overlay(self):

@@ -6,12 +6,9 @@ This inventory records why files exist before moving or deleting them. It reflec
 
 | File | Current role | Decision |
 |---|---|---|
-| start_interview_copilot.bat | Windows development launcher; starts app/run_app.py with pythonw | Keep |
-| app/run_app.py | Windows runner; configures import paths and starts InterviewApp | Keep; simplify import behavior in a later phase |
-| scripts/run.sh | macOS launcher; creates venv/.env and starts app/main.py | Keep; currently starts a different module implementation |
-| app/main.py | Runtime coordinator used by macOS launcher and packaging/main.spec | Keep |
+| app/run_app.py | Packaged entry point for Windows and macOS | Keep; simplify import behavior in a later phase |
+| app/main.py | Runtime coordinator used by the packaged entry point | Keep |
 | packaging/main.spec | PyInstaller build definition | Keep until packaged-build validation is available |
-| scripts/watch_build.py | Developer utility that rebuilds the packaged Windows executable | Optional tool; keep until user confirms packaged builds are no longer used |
 | app/core/project_bootstrap.py | Project-root and .env validation used by app/main.py and app/run_app.py | Keep; add isolated tests |
 | app/setup/installer.py | SetupWizard used by the overlay Configure action; also includes older install and web-login pages | Keep for now; split or simplify only after configuration-page behavior is covered |
 
@@ -35,7 +32,7 @@ This inventory records why files exist before moving or deleting them. It reflec
 
 - app/core/config.py, app/ui/overlay.py, app/services/openai_service.py, app/services/response_parser.py, app/screen/screen_capture.py, app/screen/screen_watcher.py, app/screen/capture_exclude.py, app/ui/glass_effect.py, and app/ui/glass_theme.py are parallel implementations used when app/main.py is started directly with the root directory first on sys.path, including the current macOS launcher.
 - app/services/coding_detector.py and app/services/response_parser.py are related to app/services/openai_service.py implementation.
-- These are not proven dead code: scripts/run.sh and packaging/main.spec now point at app/main.py. The Windows development launcher still intentionally prioritizes wboxai_app/ and llm_project/; do not merge those variants without platform smoke tests.
+- The native packages use app/run_app.py, which prioritizes wboxai_app/ and llm_project/. The parallel modules still support direct source execution and tests.
 
 ### LLM and response processing
 

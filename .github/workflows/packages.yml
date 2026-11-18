@@ -1,0 +1,59 @@
+name: Build desktop packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["fix/runtime-recovery"]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            file: Interview-Copilot.exe
+          - runner: macos-15
+            file: Interview-Copilot.dmg
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -r requirements.txt pyinstaller
+      - if: runner.os == 'macOS'
+        run: |
+          swiftc -parse-as-library packaging/macos_audio.swift -o "$RUNNER_TEMP/interview-copilot-audio"
+          echo "COPILOT_MAC_AUDIO_HELPER=$RUNNER_TEMP/interview-copilot-audio" >> "$GITHUB_ENV"
+      - run: python -m PyInstaller --clean --noconfirm --distpath "${{ runner.temp }}/copilot-dist" --workpath "${{ runner.temp }}/copilot-build" packaging/main.spec
+      - if: runner.os == 'macOS'
+        run: |
+          mkdir "$RUNNER_TEMP/dmg-content"
+          ditto "$RUNNER_TEMP/copilot-dist/Interview Copilot.app" "$RUNNER_TEMP/dmg-content/Interview Copilot.app"
+          ln -s /Applications "$RUNNER_TEMP/dmg-content/Applications"
+          hdiutil create -volname "Interview Copilot" -srcfolder "$RUNNER_TEMP/dmg-content" -format UDZO "$RUNNER_TEMP/copilot-dist/Interview-Copilot.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.file }}
+          path: ${{ runner.temp }}/copilot-dist/${{ matrix.file }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: assets
+      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes assets/Interview-Copilot.exe assets/Interview-Copilot.dmg
+        env:
+          GH_TOKEN: ${{ github.token }}

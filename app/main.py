@@ -37,7 +37,7 @@ import config
 from audio_processing.audio_capture import AudioChunk, SpeechRecorder
 from audio_processing.interviewer_turn import InterviewerTurn
 from openai_service import (
-    check_ssl_connectivity, format_api_error, generate_answer,
+    format_api_error, generate_answer,
     solve_from_screenshot, transcribe,
 )
 from overlay import OverlayWindow
@@ -52,6 +52,7 @@ class WorkerBridge(QObject):
     spoken_answer = pyqtSignal(str, str)
     answer = pyqtSignal(object)
     error = pyqtSignal(str)
+    credits_exhausted = pyqtSignal(str)
     scan_failed = pyqtSignal(str)
     jpeg_ready = pyqtSignal(bytes, str)
     watch_jpeg_ready = pyqtSignal(bytes, bool)
@@ -59,7 +60,7 @@ class WorkerBridge(QObject):
 
 class InterviewApp:
     def __init__(self):
-        self.app = QApplication(sys.argv)
+        self.app = QApplication.instance() or QApplication(sys.argv)
         self.app.setApplicationName("Interview Copilot")
         self.window = OverlayWindow()
         self.bridge = WorkerBridge()
@@ -95,6 +96,7 @@ class InterviewApp:
             self.bridge.spoken_answer.connect(self.window.update_live_transcript)
         self.bridge.answer.connect(self.window.answer_ready.emit)
         self.bridge.error.connect(self._on_error)
+        self.bridge.credits_exhausted.connect(self._on_credits_exhausted)
         self.bridge.scan_failed.connect(self._on_scan_failed)
         self.bridge.jpeg_ready.connect(self._on_scan_jpeg_ready)
         self.bridge.watch_jpeg_ready.connect(self._on_watch_jpeg_ready)
@@ -110,6 +112,20 @@ class InterviewApp:
         if config.SCREEN_WATCH_ENABLED:
             self._watcher.enabled = True
             self._watch_timer.start(config.SCREEN_WATCH_INTERVAL_SEC * 1000)
+
+    def _on_credits_exhausted(self, provider: str) -> None:
+        from app.credentials import configure_key
+
+        configure_key(provider, self.window, exhausted=True)
+
+    def _report_error(self, error: Exception) -> None:
+        from llm_project.provider_credits import CreditsExhausted, openai_credits_exhausted
+
+        if isinstance(error, CreditsExhausted):
+            self.bridge.credits_exhausted.emit(error.provider)
+        elif openai_credits_exhausted(error):
+            self.bridge.credits_exhausted.emit("openai")
+        self.bridge.error.emit(format_api_error(error))
 
     def _on_error(self, msg: str) -> None:
         self.window.status_changed.emit(f"Error: {msg}")
@@ -179,7 +195,7 @@ class InterviewApp:
             show_answer(response)
             self.bridge.status.emit("Assessment solution ready")
         except Exception as exc:
-            self.bridge.error.emit(format_api_error(exc))
+            self._report_error(exc)
             traceback.print_exc()
         finally:
             self._finish_work()
@@ -221,7 +237,7 @@ class InterviewApp:
             self.bridge.answer.emit({"provider": "openai", "response": response})
             self.bridge.status.emit("Coding solution ready — Ctrl+Shift+S to rescan" if response.is_coding and response.code else "Ready — Ctrl+Shift+S to rescan")
         except Exception as exc:
-            self.bridge.error.emit(format_api_error(exc))
+            self._report_error(exc)
             traceback.print_exc()
         finally:
             self._finish_work()
@@ -344,7 +360,7 @@ class InterviewApp:
             self._live_system_stt = None
             self._streaming_stt_active = False
             self.system_recorder = self.mic_recorder = None
-            self.bridge.error.emit(format_api_error(exc))
+            self._report_error(exc)
             self.window.set_listening_state(False)
             return
 
@@ -400,7 +416,7 @@ class InterviewApp:
         try:
             self._process_interviewer_text(text)
         except Exception as exc:
-            self.bridge.error.emit(format_api_error(exc))
+            self._report_error(exc)
             traceback.print_exc()
         finally:
             self._finish_work()
@@ -467,7 +483,7 @@ class InterviewApp:
                 self.candidate_transcripts.append(text)
                 self.bridge.spoken_answer.emit("Your answer", text)
         except Exception as exc:
-            self.bridge.status.emit(f"Microphone transcription failed: {format_api_error(exc)}")
+            self._report_error(exc)
             traceback.print_exc()
 
     def _worker_process_audio(self, chunk: AudioChunk) -> None:
@@ -489,7 +505,7 @@ class InterviewApp:
                 return
             self._process_interviewer_text(text)
         except Exception as exc:
-            self.bridge.error.emit(format_api_error(exc))
+            self._report_error(exc)
             traceback.print_exc()
         finally:
             self._finish_work()
@@ -542,7 +558,7 @@ class InterviewApp:
             self.conversation.append({"role": "assistant", "content": answer_text})
             self.bridge.status.emit("Ready — listening...")
         except Exception as exc:
-            self.bridge.error.emit(format_api_error(exc))
+            self._report_error(exc)
             traceback.print_exc()
 
     def run(self) -> int:
@@ -556,8 +572,7 @@ class InterviewApp:
         msg = f"Ready ({plat})"
         if config.openai_key_configured():
             msg += " · API key OK"
-            _, ssl_note = check_ssl_connectivity()
-            msg += f" · {ssl_note}"
+
         else:
             msg += " · set OPENAI_API_KEY in interview-copilot/.env"
         if config.use_transparent_overlay():

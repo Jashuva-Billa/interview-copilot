@@ -5,9 +5,13 @@ from __future__ import annotations
 import os
 import queue
 import re
+import select
+import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
@@ -154,6 +158,45 @@ class WasapiLoopbackStream:
         self.stop()
 
 
+class MacSystemAudioStream:
+    def __init__(self, callback):
+        self.callback = callback
+        self.process = None
+
+    def start(self):
+        bundle = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+        helper = bundle / "interview-copilot-audio"
+        if not helper.is_file():
+            raise RuntimeError("The macOS system audio helper is missing from this build.")
+        self.process = subprocess.Popen([str(helper)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if not select.select([self.process.stderr], [], [], 30)[0]:
+            self.stop()
+            raise RuntimeError("System audio setup timed out. Check the macOS recording permission.")
+        ready = self.process.stderr.readline().decode(errors="replace").strip()
+        if ready != "READY":
+            self.stop()
+            raise RuntimeError(ready or "macOS system audio is unavailable.")
+        threading.Thread(target=self._read, args=(self.process.stdout,), daemon=True).start()
+
+    def _read(self, pipe):
+        while data := pipe.read(FRAME_SAMPLES * 4):
+            if len(data) != FRAME_SAMPLES * 4:
+                return
+            self.callback(np.frombuffer(data, dtype="<f4"), FRAME_SAMPLES, None, None)
+
+    def stop(self):
+        if self.process is not None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait()
+            self.process = None
+
+    close = stop
+
+
 def _find_loopback_device() -> tuple[int, str] | None:
     try:
         import pyaudiowpatch as pyaudio
@@ -186,6 +229,8 @@ def resolve_input_device(source: Optional[str] = None) -> InputDevice:
         if _probe_input_device(None):
             return InputDevice(None, _device_name(None))
         raise RuntimeError("Cannot open microphone. Check Windows Sound settings and try again.")
+    if sys.platform == "darwin":
+        return InputDevice(None, "macOS system playback", system_audio=True)
     loopback = _find_loopback_device()
     if loopback is not None:
         index, label = loopback
@@ -302,7 +347,10 @@ class SpeechRecorder:
                       blocksize=FRAME_SAMPLES, latency="low", callback=callback)
         if self._device is not None:
             kwargs["device"] = self._device
-        if device.wasapi:
+        if device.system_audio and sys.platform == "darwin":
+            self._stream = MacSystemAudioStream(callback)
+            self._stream.start()
+        elif device.wasapi:
             self._stream = WasapiLoopbackStream(self._device, SAMPLE_RATE, FRAME_SAMPLES, callback)
             self._stream.start()
         else:

@@ -8,19 +8,7 @@ Keep Interview Copilot small, explicit, and testable. Apply separation of concer
 
 ### Windows interactive launcher
 
-start_interview_copilot.bat starts app/run_app.py with the project virtual environment's pythonw.exe.
-
-app/run_app.py adds project module directories to sys.path, validates the project environment, and starts the app/main.py InterviewApp. With that import order, the Windows path currently resolves several modules from wboxai_app/ and llm_project/, and audio capture from audio_processing/.
-
-### macOS launcher
-
-scripts/run.sh prepares the local virtual environment and root .env, then starts app/main.py directly. This uses the moved root-platform modules from app/core/, app/ui/, app/services/, and app/screen/.
-
-### Packaged Windows build
-
-packaging/main.spec packages app/main.py; scripts/watch_build.py invokes PyInstaller. installer.py contains the configuration wizard used by the active overlay's Configure action and also retains a legacy installation/build flow.
-
-These paths are not yet a single canonical implementation. The similarly named root, wboxai_app/, and llm_project/ modules have meaningful behavioral differences. Do not delete or merge them solely because their names match.
+Both native packages start app/run_app.py. PyInstaller packages the same app coordinator and UI for Windows and macOS. Windows uses WASAPI loopback, and the macOS bundle includes a ScreenCaptureKit audio helper. Settings are saved per user outside the package.
 
 ## Organized repository layout
 
@@ -28,7 +16,6 @@ The root keeps the Windows launcher, repository metadata, documentation, and dep
 
 ```text
 interview-copilot/
-  start_interview_copilot.bat
   app/
     main.py
     run_app.py

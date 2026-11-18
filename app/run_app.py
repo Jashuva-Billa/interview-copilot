@@ -1,12 +1,4 @@
-"""Standalone product runner for WboxAI.
-
-The Wbox web login/session flow is intentionally disabled during development.
-API credentials are loaded directly from this repository's .env by config.py.
-
-Usage:
-    python app/run_app.py
-    python app/run_app.py --no-resume
-"""
+"""Packaged desktop entry point for Interview Copilot."""
 
 from __future__ import annotations
 
@@ -34,9 +26,6 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-# ── flags ─────────────────────────────────────────────────────────────────────
-_NO_RESUME = "--no-resume" in sys.argv
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Bootstrap (.env checks)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -50,64 +39,23 @@ except (Exception, SystemExit) as e:
     sys.exit(1)
 
 # ── now safe to import everything ─────────────────────────────────────────────
-from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication
 import config
 from main import InterviewApp as _BaseInterviewApp
 
 
-class AppRunner(_BaseInterviewApp):
-    """Thin runner that bypasses web login and uses local .env credentials."""
+AppRunner = _BaseInterviewApp
 
-    def run(self) -> int:
-        self.app.setQuitOnLastWindowClosed(False)
-        print("[run_app] Login/session flow disabled; using credentials from this repository's .env.", flush=True)
 
-        if _NO_RESUME:
-            print("[run_app] --no-resume: skipping candidate picker.", flush=True)
-            import time as _time
-            config.SELECTED_CANDIDATE_NAME = "TestCandidate"
-            config.SESSION_TIMESTAMP = _time.strftime("%Y%m%d_%H%M%S")
-        else:
-            # Resume context selection is independent of authentication.
-            from overlay import show_resume_dialog
-            show_resume_dialog()
+def main() -> int:
+    from app.credentials import configure_openai
 
-        self.app.setQuitOnLastWindowClosed(True)
-
-        import time as _time
-        candidate_name = getattr(config, "SELECTED_CANDIDATE_NAME", "UnknownCandidate")
-        timestamp = getattr(config, "SESSION_TIMESTAMP", _time.strftime("%Y%m%d_%H%M%S"))
-        from latency_tracker import tracker
-        tracker.set_dynamic_filepaths(candidate_name, timestamp)
-
-        self.window.show()
-        self.window.move(80, 80)
-        self.window.raise_()
-        if not config.STEALTH_FOCUS:
-            self.window.activateWindow()
-        QTimer.singleShot(300, self.window._apply_exclude_once)
-
-        msg = "Ready (Windows)"
-        active_providers = config.get_active_providers()
-        if active_providers:
-            msg += f" | Providers: {', '.join(p.upper() for p in active_providers)}"
-        else:
-            msg += " | Configure OpenAI, Gemini, or Claude in .env"
-        if config.use_transparent_overlay():
-            msg += " | transparent"
-        if config.INVISIBLE_IN_SHARE:
-            msg += " | share-hide on"
-        if config.STEALTH_FOCUS:
-            msg += " | stealth"
-        if config.load_resume_context():
-            msg += " | resume loaded"
-        self.window.status_changed.emit(msg)
-
-        if self._watcher.enabled:
-            self.window.set_watch_checked(True)
-
-        return self.app.exec()
+    qt_app = QApplication(sys.argv)
+    qt_app.setApplicationName("Interview Copilot")
+    if not config.openai_key_configured() and not configure_openai():
+        return 0
+    return AppRunner().run()
 
 
 if __name__ == "__main__":
-    sys.exit(AppRunner().run())
+    sys.exit(main())
