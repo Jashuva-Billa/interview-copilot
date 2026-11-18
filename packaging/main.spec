@@ -23,7 +23,7 @@ if mac:
         name="Interview Copilot.app",
         bundle_identifier="com.interviewcopilot.desktop",
         info_plist={
-            "LSMinimumSystemVersion": "13.0",
+            "LSMinimumSystemVersion": "14.0",
             "NSMicrophoneUsageDescription": "Transcribe your spoken interview answers.",
             "NSScreenCaptureUsageDescription": "Capture interviewer audio and assessment screenshots.",
         },

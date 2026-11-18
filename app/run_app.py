@@ -52,6 +52,10 @@ def main() -> int:
 
     qt_app = QApplication(sys.argv)
     qt_app.setApplicationName("Interview Copilot")
+    if "--package-smoke-test" in sys.argv:
+        runner = AppRunner()
+        runner.window.close()
+        return 0
     if not config.openai_key_configured() and not configure_openai():
         return 0
     return AppRunner().run()

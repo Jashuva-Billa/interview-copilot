@@ -7,7 +7,7 @@ A local desktop interview assistant for GenAI, machine learning, AI engineering,
 ## Install
 
 - **Windows x64** — Open `Interview-Copilot.exe`.
-- **Apple Silicon Mac, macOS 13 or later** — Open `Interview-Copilot.dmg`, drag Interview Copilot to Applications, and launch it. Allow access to the microphone and Screen & System Audio Recording when prompted.
+- **Apple Silicon Mac, macOS 14 or later** — Open `Interview-Copilot.dmg`, drag Interview Copilot to Applications, and launch it. Allow access to the microphone and Screen & System Audio Recording when prompted.
 
 Enter an OpenAI API key the first time. The app stores it in your per-user app data and reuses it at later launches. A confirmed credit exhaustion error offers key replacement. Temporary rate limits and network errors do not open setup.
 
