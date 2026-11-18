@@ -16,6 +16,17 @@ from audio_processing import audio_capture
 
 
 class DualAudioRoutingTests(unittest.TestCase):
+    def test_loud_speech_does_not_mask_the_following_quiet_clause(self):
+        detector = audio_capture.EnergyVAD(loopback=True)
+        loud = np.full(audio_capture.FRAME_SAMPLES, 0.18, dtype=np.float32)
+        quiet = np.full(audio_capture.FRAME_SAMPLES, 0.010, dtype=np.float32)
+        silence = np.full(audio_capture.FRAME_SAMPLES, 0.001, dtype=np.float32)
+
+        for _ in range(300):
+            self.assertTrue(detector.is_speech(loud))
+        self.assertFalse(detector.is_speech(silence))
+        self.assertTrue(detector.is_speech(quiet))
+
     def test_endpoint_timeout_grows_for_longer_questions(self):
         with patch.dict("os.environ", {
             "AUDIO_END_SILENCE_MS": "900",

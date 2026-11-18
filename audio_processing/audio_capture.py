@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -282,8 +283,11 @@ class EnergyVAD:
 
     def is_speech(self, frame: np.ndarray) -> bool:
         energy = float(np.sqrt(np.mean(frame.astype(np.float32) ** 2)))
-        self._noise_floor = min(self._noise_floor * 0.995 + energy * 0.005, 0.05)
-        return energy > max(self.threshold, self._noise_floor * 3.0)
+        speech = energy > max(self.threshold, self._noise_floor * 3.0)
+        # Speech must not raise the floor enough to hide later syllables.
+        if not speech:
+            self._noise_floor = self._noise_floor * 0.995 + energy * 0.005
+        return speech
 
 
 class SpeechRecorder:
@@ -379,6 +383,7 @@ class SpeechRecorder:
 
     def _process_loop(self) -> None:
         buffer: list[np.ndarray] = []
+        before_speech = deque(maxlen=max(1, 160 // FRAME_MS))
         speech_frames = silence_frames = 0
         in_speech = False
         min_speech_frames = max(1, int(250 / FRAME_MS))
@@ -412,6 +417,8 @@ class SpeechRecorder:
             if is_speech:
                 now = time.perf_counter()
                 if not in_speech:
+                    buffer.extend(before_speech)
+                    before_speech.clear()
                     utterance_counter += 1
                     utterance_id = f"{id(self)}-{utterance_counter}"
                     last_partial_at = 0.0
@@ -454,6 +461,7 @@ class SpeechRecorder:
                     utterance_id = ""
                     last_partial_at = 0.0
             else:
+                before_speech.append(frame)
                 idle_frames += 1
                 if idle_frames == int(15000 / FRAME_MS):
                     speaker = "interviewer" if self._loopback else "candidate"
